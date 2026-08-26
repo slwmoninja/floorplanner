@@ -1728,7 +1728,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+0c2aabab';
+  const APP_VERSION = '1.0+72b03f32';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -1891,7 +1891,7 @@
       if(isInstalled()) return; // could have installed (or been asked elsewhere) during the delay
       try{ localStorage.setItem(INSTALL_ASKED_KEY,'1'); }catch(e){}
       const wrap = openModal('Install PhotoDesigner?',
-        '<div style="margin-bottom:.9rem;">Installing adds PhotoDesigner to your Home Screen and gives it the strongest protection against your browser silently clearing its data.</div>' +
+        '<div style="margin-bottom:.9rem;">Installing adds PhotoDesigner to your Home Screen for quick, full-screen access — no browser address bar, and faster loading since the app shell is cached on your device.</div>' +
         '<button class="btn-primary" id="installPromptYes">Install</button>' +
         '<button class="btn-secondary" id="installPromptNo">Not now</button>'
       );
