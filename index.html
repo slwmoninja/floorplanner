@@ -23,12 +23,16 @@
     -webkit-tap-highlight-color:transparent; overscroll-behavior:none;
   }
   header{
-    display:flex; align-items:center; gap:.6rem; padding:.75rem 1rem;
+    display:flex; flex-direction:column; gap:.25rem; padding:.75rem 1rem;
     border-bottom:1px solid var(--border); background:var(--panel);
     position:sticky; top:0; z-index:20;
   }
+  header .headerTop{ display:flex; align-items:center; gap:.6rem; }
   header h1{font-size:1.02rem; margin:0; font-weight:650; letter-spacing:.2px;}
-  header .sub{color:var(--dim); font-size:.78rem; margin-left:.15rem;}
+  header .sub{
+    color:var(--dim); font-size:.78rem; text-align:center;
+    text-wrap:balance; /* distributes wrapped words evenly across lines instead of a long line + short leftover */
+  }
   header .spacer{flex:1;}
 
   main{max-width:1180px; margin:0 auto; padding:1rem; padding-bottom:5rem;}
@@ -255,12 +259,14 @@
 <div class="pull-refresh hidden" id="pullRefresh"><span class="arrow">&#8595;</span></div>
 
 <header>
-  <h1>PhotoDesigner</h1>
+  <div class="headerTop">
+    <h1>PhotoDesigner</h1>
+    <div class="spacer"></div>
+    <button class="topbar-install-btn" id="installBtn" style="display:none;" title="Install PhotoDesigner on this device">Install</button>
+    <button class="btn" id="infoBtn" title="About PhotoDesigner">&#9432;</button>
+    <button class="btn" id="startOverBtn" style="display:none;" title="Discard this photo and start over with a new one">Start over</button>
+  </div>
   <span class="sub">Cut, hide and paste objects in photos</span>
-  <div class="spacer"></div>
-  <button class="topbar-install-btn" id="installBtn" style="display:none;" title="Install PhotoDesigner on this device">Install</button>
-  <button class="btn" id="infoBtn" title="About PhotoDesigner">&#9432;</button>
-  <button class="btn" id="startOverBtn" style="display:none;" title="Discard this photo and start over with a new one">Start over</button>
 </header>
 
 <main>
@@ -2021,7 +2027,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+ee5b6f36';
+  const APP_VERSION = '1.0+ee30004f';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
