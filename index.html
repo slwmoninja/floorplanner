@@ -13,6 +13,7 @@
     --bg:#14161a; --panel:#1c1f25; --panel2:#20242b; --border:#2c313a;
     --text:#e8ebef; --dim:#9aa3af; --accent:#40d0b5; --accent-dim:#2b8f7c;
     --danger:#e0607a; --danger-dim:#a8455c; --warn:#e0b04a;
+    --bottom-bar-h: 4.5rem; /* reserved space for the fixed Save/Restore bar, incl. safe-area */
   }
   *{box-sizing:border-box;}
   html,body{height:100%;}
@@ -68,9 +69,10 @@
   }
   .resumeCard img{ width:52px; height:52px; object-fit:cover; border-radius:8px; flex:none; background:#191b1f; }
   .resumeCard .meta{ flex:1; min-width:0; }
-  .resumeCard .meta .title{ font-weight:600; font-size:.86rem; }
-  .resumeCard .meta .sub{ color:var(--dim); font-size:.74rem; }
+  .resumeCard .meta .title{ font-weight:600; font-size:.86rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .resumeCard .meta .sub{ color:var(--dim); font-size:.74rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .resumeCard .actions{ display:flex; gap:.4rem; flex:none; }
+  .resumeCard .actions .btn{ width:2.2rem; height:2.2rem; padding:0; font-size:1rem; line-height:1; display:flex; align-items:center; justify-content:center; }
 
   /* ---------- Editor ---------- */
   #editorScreen{ display:none; }
@@ -97,7 +99,7 @@
     padding:.5rem .7rem; border-bottom:1px solid var(--border); font-size:.78rem; color:var(--dim);
   }
   .stageScroll{
-    overflow:auto; max-height:70vh; display:flex; align-items:flex-start; justify-content:flex-start;
+    overflow:auto; max-height:calc(70vh - var(--bottom-bar-h)); display:flex; align-items:flex-start; justify-content:flex-start;
     background:
       linear-gradient(45deg,#0e1013 25%,transparent 25%),
       linear-gradient(-45deg,#0e1013 25%,transparent 25%),
@@ -307,7 +309,7 @@
 
       <div class="divider"></div>
       <label class="mini">Zoom
-        <input type="range" id="zoomSlider" min="50" max="400" value="100">
+        <input type="range" id="zoomSlider" min="15" max="400" value="100">
       </label>
 
       <div class="divider"></div>
@@ -719,7 +721,7 @@
     pointCountBadge.textContent = points.length + ' point' + (points.length===1?'':'s');
     navigateTo('editor');
 
-    zoomSlider.value = 100;
+    zoomSlider.value = computeFitZoomPercent();
     fitStageCanvas();
     renderStage();
     renderReview();
@@ -766,11 +768,12 @@
     meta.append(title, sub);
     const actions = document.createElement('div'); actions.className = 'actions';
     const resumeBtn = document.createElement('button');
-    resumeBtn.className = 'btn'; resumeBtn.textContent = 'Restore Project';
-    resumeBtn.title = 'Pick up exactly where you left off';
+    resumeBtn.className = 'btn'; resumeBtn.textContent = '↻';
+    resumeBtn.title = 'Restore Project — pick up exactly where you left off';
+    resumeBtn.dataset.action = 'restore-project';
     resumeBtn.addEventListener('click', ()=> kind==='editor' ? resumeEditorProject(proj) : resumePlaceProject(proj));
     const discardBtn = document.createElement('button');
-    discardBtn.className = 'btn'; discardBtn.textContent = 'Delete';
+    discardBtn.className = 'btn'; discardBtn.textContent = '✕';
     discardBtn.title = 'Delete this saved project';
     discardBtn.addEventListener('click', async ()=>{
       await projectDbDelete(kind);
@@ -816,7 +819,7 @@
     if(editorProj) list.appendChild(buildResumeCard('editor', editorProj));
     if(placeProj) list.appendChild(buildResumeCard('place', placeProj));
     list.addEventListener('click', (e)=>{
-      if(e.target.tagName==='BUTTON' && e.target.textContent==='Restore Project') setTimeout(()=>wrap.remove(), 30);
+      if(e.target.dataset && e.target.dataset.action==='restore-project') setTimeout(()=>wrap.remove(), 30);
     });
   });
 
@@ -875,7 +878,7 @@
     resetEditorState();
     navigateTo('editor');
 
-    zoomSlider.value = 100;
+    zoomSlider.value = computeFitZoomPercent();
     fitStageCanvas();
     renderStage();
     renderReview();
@@ -1264,6 +1267,25 @@
   });
 
   // ---------- Stage rendering ----------
+  // Whole photo visible on first open, no scrolling required -- scales down for
+  // photos bigger than the stage, and (capped at 100%) never blows up a small
+  // photo past its native size just to fill the frame.
+  function computeFitZoomPercent(){
+    if(!workW || !workH) return 100;
+    // stageScroll has no fixed height (just overflow:auto + max-height), so its
+    // clientHeight is driven by its content's current size -- measuring it
+    // before the canvas has real dimensions just reads back the browser's
+    // un-sized-canvas default (300x150) and produces a bogus, way-too-small fit.
+    // Give the canvas its true work-resolution size first so the container
+    // reports its actual (max-height-capped) available space.
+    stageCanvas.width = workW; stageCanvas.height = workH;
+    stageCanvas.style.width = workW + 'px'; stageCanvas.style.height = workH + 'px';
+    const containerW = stageScroll.clientWidth || 800;
+    const containerH = stageScroll.clientHeight || Math.round(window.innerHeight*0.6);
+    const fit = Math.min(containerW/workW, containerH/workH, 1);
+    const min = parseInt(zoomSlider.min,10), max = parseInt(zoomSlider.max,10);
+    return clamp(Math.round(fit*100), min, max);
+  }
   function fitStageCanvas(){
     const zoom = parseInt(zoomSlider.value,10)/100;
     displayScale = zoom;
@@ -1999,7 +2021,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+54282e82';
+  const APP_VERSION = '1.0+ee5b6f36';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
