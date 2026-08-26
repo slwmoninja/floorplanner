@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>PhotoDesigner — isolate, erase, and compose photos</title>
+<meta name="theme-color" content="#14161a">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<style>
+  :root{
+    --bg:#14161a; --panel:#1c1f25; --panel2:#20242b; --border:#2c313a;
+    --text:#e8ebef; --dim:#9aa3af; --accent:#40d0b5; --accent-dim:#2b8f7c;
+    --danger:#e0607a; --danger-dim:#a8455c; --warn:#e0b04a;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-tap-highlight-color:transparent; overscroll-behavior:none;
+  }
+  header{
+    display:flex; align-items:center; gap:.6rem; padding:.75rem 1rem;
+    border-bottom:1px solid var(--border); background:var(--panel);
+    position:sticky; top:0; z-index:20;
+  }
+  header h1{font-size:1.02rem; margin:0; font-weight:650; letter-spacing:.2px;}
+  header .sub{color:var(--dim); font-size:.78rem; margin-left:.15rem;}
+  header .spacer{flex:1;}
+
+  main{max-width:1180px; margin:0 auto; padding:1rem; padding-bottom:5rem;}
+
+  /* ---------- Buttons: one consistent look for every key action/mode control.
+     Hierarchy comes from label and position, not from mixing filled/outline/pill
+     styles -- hover/long-press on any of them shows its title as a brief hint
+     (see the Hints section below) instead of permanent on-screen instructions. */
+  .btn{
+    background:transparent; border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:.45rem .75rem; font-weight:600; font-size:.82rem;
+    cursor:pointer; white-space:nowrap;
+  }
+  .btn:hover{ border-color:var(--accent); }
+  .btn.active{ border-color:var(--accent); color:var(--accent); background:rgba(64,208,181,.12); }
+  .btn:disabled{ opacity:.4; cursor:not-allowed; }
+
+  /* ---------- Upload screen ---------- */
+  #uploadScreen{ display:flex; flex-direction:column; align-items:center; gap:1rem; padding:2.2rem 1rem; }
+  .dropzone{
+    width:100%; max-width:640px; border:2px dashed var(--border); border-radius:16px;
+    padding:2.6rem 1.4rem; text-align:center; background:var(--panel); cursor:pointer;
+    transition:border-color .15s, background .15s;
+  }
+  .dropzone.drag{ border-color:var(--accent); background:var(--panel2); }
+  .dropzone .big{ font-size:1.05rem; font-weight:600; margin-bottom:.35rem; }
+  .dropzone .small{ color:var(--dim); font-size:.85rem; }
+  .urlRow{ display:flex; gap:.5rem; width:100%; max-width:640px; }
+  .urlRow input{
+    flex:1; background:var(--panel); border:1px solid var(--border); color:var(--text);
+    border-radius:9px; padding:.6rem .75rem; font-size:.9rem;
+  }
+  #fileInput{ display:none; }
+
+  /* ---------- Editor ---------- */
+  #editorScreen{ display:none; }
+  .toolbar{
+    display:flex; flex-wrap:wrap; gap:.5rem; align-items:center;
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:.6rem .7rem; margin-bottom:.8rem;
+  }
+  .segGroup{ display:flex; flex-wrap:wrap; gap:.4rem; }
+  .toolbar label.mini{ color:var(--dim); font-size:.75rem; display:flex; align-items:center; gap:.4rem; }
+  .toolbar input[type=range]{ width:100px; accent-color:var(--accent); }
+  .toolbar .divider{ width:1px; align-self:stretch; background:var(--border); margin:0 .2rem; }
+  .badge{ font-size:.72rem; color:var(--dim); padding:.15rem .5rem; border:1px solid var(--border); border-radius:99px; }
+
+  .workspace{ display:grid; grid-template-columns:1fr 320px; gap:.9rem; align-items:start; }
+  @media (max-width:880px){ .workspace{ grid-template-columns:1fr; } }
+
+  .stagePanel{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    overflow:hidden; position:relative;
+  }
+  .stagePanel .stageHead{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:.5rem .7rem; border-bottom:1px solid var(--border); font-size:.78rem; color:var(--dim);
+  }
+  .stageScroll{
+    overflow:auto; max-height:70vh; display:flex; align-items:flex-start; justify-content:flex-start;
+    background:
+      linear-gradient(45deg,#0e1013 25%,transparent 25%),
+      linear-gradient(-45deg,#0e1013 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#0e1013 75%),
+      linear-gradient(-45deg,transparent 75%,#0e1013 75%);
+    background-size:20px 20px; background-position:0 0,0 10px,10px -10px,-10px 0px;
+    background-color:#191b1f;
+    touch-action:none;
+  }
+  #stageCanvas{ display:block; cursor:crosshair; }
+  #stageCanvas.eraseMode{ cursor:cell; }
+  #stageCanvas.panMode{ cursor:grab; }
+
+  .reviewPanel{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:hidden;
+    position:sticky; top:70px;
+  }
+  .reviewPanel .stageHead{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:.5rem .7rem; border-bottom:1px solid var(--border); font-size:.78rem; color:var(--dim);
+  }
+  .reviewBody{
+    padding:.7rem; display:flex; flex-direction:column; gap:.6rem; align-items:center;
+  }
+  .checkerFrame{
+    width:100%; aspect-ratio:1/1; border-radius:9px; overflow:hidden;
+    background:
+      linear-gradient(45deg,#0e1013 25%,transparent 25%),
+      linear-gradient(-45deg,#0e1013 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#0e1013 75%),
+      linear-gradient(-45deg,transparent 75%,#0e1013 75%);
+    background-size:16px 16px; background-position:0 0,0 8px,8px -8px,-8px 0px;
+    background-color:#191b1f;
+    display:flex; align-items:center; justify-content:center;
+  }
+  #reviewCanvas{ max-width:100%; max-height:100%; }
+  .emptyReview{ color:var(--dim); font-size:.8rem; text-align:center; padding:1rem; }
+
+  .savePanel{ width:100%; display:flex; flex-direction:column; gap:.5rem; }
+  .saveRow{ display:flex; gap:.4rem; }
+  select, input[type=text]{
+    background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:.45rem .55rem; font-size:.82rem;
+  }
+  select{ flex:1; }
+  input[type=text]{ flex:1; }
+  input[type=color]{ width:36px; height:34px; border:1px solid var(--border); border-radius:8px; background:none; padding:0; cursor:pointer; }
+  .saveNote{ color:var(--dim); font-size:.72rem; line-height:1.4; }
+
+  /* ---------- Hints: hover (desktop) or long-press (touch) on any button shows
+     its title as a small bubble, instead of a permanent on-screen instruction. */
+  .hintBubble{
+    position:fixed; z-index:60; background:#20242b; border:1px solid var(--border);
+    color:var(--text); padding:.4rem .6rem; border-radius:8px; font-size:.76rem;
+    line-height:1.35; max-width:260px; box-shadow:0 8px 20px rgba(0,0,0,.4);
+    pointer-events:none;
+  }
+
+  .toast{
+    position:fixed; bottom:1.1rem; left:50%; transform:translateX(-50%);
+    background:#20242b; border:1px solid var(--border); color:var(--text);
+    padding:.6rem 1rem; border-radius:10px; font-size:.82rem; z-index:50;
+    box-shadow:0 8px 24px rgba(0,0,0,.4); max-width:90vw;
+  }
+  .toast.err{ border-color:var(--danger); color:#ffd7de; }
+
+  .spinnerRow{ display:flex; align-items:center; gap:.5rem; color:var(--dim); font-size:.8rem; }
+  .spinner{
+    width:14px; height:14px; border-radius:50%; border:2px solid var(--border);
+    border-top-color:var(--accent); animation:spin .7s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  footer{ text-align:center; color:var(--dim); font-size:.72rem; padding:1rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PhotoDesigner</h1>
+  <span class="sub">isolate, erase, and compose photos</span>
+  <div class="spacer"></div>
+  <button class="btn" id="startOverBtn" style="display:none;" title="Discard this photo and start over with a new one">Start over</button>
+</header>
+
+<main>
+
+  <!-- ============ UPLOAD SCREEN ============ -->
+  <section id="uploadScreen">
+    <div class="dropzone" id="dropzone">
+      <div class="big">Drop a photo here, or tap to choose one</div>
+      <div class="small">Any format your device can open — JPG, PNG, WEBP, HEIC, GIF, BMP, AVIF. You can also paste an image with Ctrl/Cmd+V.</div>
+    </div>
+    <input type="file" id="fileInput" accept="image/*">
+    <div class="urlRow">
+      <input type="text" id="urlInput" placeholder="…or paste a web photo URL (https://…)" title="Some sites block cross-origin image data — if a URL fails, save the image and upload the file instead">
+      <button class="btn" id="loadUrlBtn">Load URL</button>
+    </div>
+  </section>
+
+  <!-- ============ EDITOR SCREEN ============ -->
+  <section id="editorScreen">
+
+    <div class="toolbar">
+      <div class="segGroup" id="modeGroup">
+        <button class="btn active" data-mode="add" title="Tap the object you want to keep">Select</button>
+        <button class="btn" data-mode="remove" title="Tap a spot to remove it from the selection">Remove</button>
+        <button class="btn" data-mode="brush" title="Freehand paint to add or erase, for pixel-level cleanup">Brush</button>
+        <button class="btn" data-mode="invisible" title="Tap an object to erase it, filled in with the surrounding background">Invisible</button>
+        <button class="btn" data-mode="pan" title="Drag to pan when zoomed in">Pan</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <label class="mini" title="How far the selection grows from where you tap">Sensitivity
+        <input type="range" id="sensSlider" min="5" max="70" value="26">
+      </label>
+
+      <div class="divider" id="brushDivider" style="display:none;"></div>
+      <label class="mini" id="brushSizeRow" style="display:none;">Brush size
+        <input type="range" id="brushSlider" min="4" max="120" value="26">
+      </label>
+      <div class="segGroup" id="brushModeGroup" style="display:none;">
+        <button class="btn active" data-brushmode="add">Add</button>
+        <button class="btn" data-brushmode="erase">Erase</button>
+      </div>
+
+      <div class="divider"></div>
+      <label class="mini">Zoom
+        <input type="range" id="zoomSlider" min="50" max="400" value="100">
+      </label>
+
+      <div class="divider"></div>
+      <button class="btn" id="undoBtn" disabled title="Undo the last edit">Undo</button>
+      <button class="btn" id="clearMaskBtn" title="Clear the current selection">Clear selection</button>
+
+      <div class="divider"></div>
+      <button class="btn" id="saveWholeBtn" disabled title="Save the whole photo as a file, including any Invisible-mode edits">Save whole photo…</button>
+      <button class="btn" id="copyWholeBtn" disabled title="Copy the whole photo to your clipboard, including any Invisible-mode edits">Copy whole photo</button>
+
+      <div class="spacer"></div>
+      <span class="badge" id="pointCountBadge">0 points</span>
+    </div>
+    <div class="saveNote" id="invisibleNote" style="margin-bottom:.6rem;"></div>
+
+    <div class="workspace">
+      <div class="stagePanel">
+        <div class="stageHead">
+          <span id="stageStatus">Loaded photo</span>
+          <span id="stageDims" class="badge"></span>
+        </div>
+        <div class="stageScroll" id="stageScroll">
+          <canvas id="stageCanvas"></canvas>
+        </div>
+      </div>
+
+      <div class="reviewPanel">
+        <div class="stageHead">
+          <span>Review</span>
+          <button class="btn" id="popoutBtn" style="padding:.2rem .5rem; font-size:.72rem;" title="Open the cutout in its own browser window">Pop out</button>
+        </div>
+        <div class="reviewBody">
+          <div class="checkerFrame" id="checkerFrame">
+            <canvas id="reviewCanvas" style="display:none;"></canvas>
+            <div class="emptyReview" id="emptyReview">Tap an object on the left — the isolated cutout will appear here.</div>
+          </div>
+
+          <div class="savePanel">
+            <div class="saveRow">
+              <select id="formatSelect">
+                <option value="png">PNG (transparent)</option>
+                <option value="webp">WEBP (transparent)</option>
+                <option value="jpeg">JPEG (solid background)</option>
+              </select>
+              <input type="color" id="bgColor" value="#ffffff" style="display:none;">
+            </div>
+            <label class="mini" style="justify-content:space-between; width:100%;">
+              <span>Trim to object</span>
+              <input type="checkbox" id="trimToggle" checked style="accent-color:var(--accent);">
+            </label>
+            <div class="saveRow">
+              <input type="text" id="filenameInput" placeholder="filename">
+            </div>
+            <button class="btn" id="saveBtn" disabled title="Save the isolated cutout as a file">Save As…</button>
+            <button class="btn" id="copyBtn" disabled title="Copy the cutout to your clipboard, to paste into another photo or document">Copy</button>
+            <div class="saveNote" id="saveNote"></div>
+            <div class="saveNote" id="copyNote"></div>
+            <button class="btn" id="placeBtn" disabled title="Load a background photo and drop this cutout onto it">Place onto another photo</button>
+            <input type="file" id="placeFileInput" accept="image/*" style="display:none;">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PLACE SCREEN ============ -->
+  <section id="placeScreen" style="display:none;">
+    <div class="toolbar">
+      <label class="mini" title="Drag a corner handle on the photo to resize, or use this slider">Size
+        <input type="range" id="placeScaleSlider" min="5" max="300" value="100">
+      </label>
+      <div class="divider"></div>
+      <label class="mini" title="Drag the top handle on the photo to rotate, or use this slider">Rotate
+        <input type="range" id="placeRotateSlider" min="-180" max="180" value="0">
+      </label>
+      <div class="divider"></div>
+      <button class="btn" id="placeBackBtn" title="Return to isolating an object; this project stays as you left it">Back to editing</button>
+      <div class="spacer"></div>
+      <span class="badge" id="placeDimsBadge"></span>
+    </div>
+
+    <div class="workspace">
+      <div class="stagePanel">
+        <div class="stageHead">
+          <span>Project (still editable)</span>
+        </div>
+        <div class="stageScroll" id="placeStageScroll">
+          <canvas id="placeCanvas"></canvas>
+        </div>
+      </div>
+
+      <div class="reviewPanel">
+        <div class="stageHead">
+          <span>Final image</span>
+        </div>
+        <div class="reviewBody">
+          <div class="checkerFrame" id="placeFinalFrame">
+            <img id="placeFinalPreview" style="display:none; max-width:100%; max-height:100%;">
+            <div class="emptyReview" id="placeFinalEmpty">Not saved yet — flatten below to create the final image. Your project stays editable either way.</div>
+          </div>
+          <div class="savePanel">
+            <div class="saveRow">
+              <select id="placeFormatSelect">
+                <option value="png">PNG</option>
+                <option value="webp">WEBP</option>
+                <option value="jpeg">JPEG</option>
+              </select>
+              <input type="text" id="placeFilenameInput" placeholder="filename">
+            </div>
+            <button class="btn" id="placeSaveBtn" title="Combine the project into one photo and save it as a file">Flatten &amp; Save As…</button>
+            <button class="btn" id="placeCopyBtn" title="Combine the project into one photo and copy it to your clipboard">Flatten &amp; Copy</button>
+            <div class="saveNote" id="placeSaveNote"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>Runs entirely on this device — your photo is never uploaded anywhere.</footer>
+
+<script>
+(function(){
+  'use strict';
+
+  // ---------- DOM ----------
+  const uploadScreen = document.getElementById('uploadScreen');
+  const editorScreen = document.getElementById('editorScreen');
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const urlInput = document.getElementById('urlInput');
+  const loadUrlBtn = document.getElementById('loadUrlBtn');
+  const startOverBtn = document.getElementById('startOverBtn');
+
+  const stageScroll = document.getElementById('stageScroll');
+  const stageCanvas = document.getElementById('stageCanvas');
+  const stageCtx = stageCanvas.getContext('2d', { willReadFrequently:true });
+  const stageDims = document.getElementById('stageDims');
+  const stageStatus = document.getElementById('stageStatus');
+
+  const reviewCanvas = document.getElementById('reviewCanvas');
+  const reviewCtx = reviewCanvas.getContext('2d');
+  const emptyReview = document.getElementById('emptyReview');
+  const popoutBtn = document.getElementById('popoutBtn');
+
+  const modeGroup = document.getElementById('modeGroup');
+  const brushModeGroup = document.getElementById('brushModeGroup');
+  const brushSizeRow = document.getElementById('brushSizeRow');
+  const brushDivider = document.getElementById('brushDivider');
+  const brushSlider = document.getElementById('brushSlider');
+  const sensSlider = document.getElementById('sensSlider');
+  const zoomSlider = document.getElementById('zoomSlider');
+  const undoBtn = document.getElementById('undoBtn');
+  const clearMaskBtn = document.getElementById('clearMaskBtn');
+  const pointCountBadge = document.getElementById('pointCountBadge');
+  const saveWholeBtn = document.getElementById('saveWholeBtn');
+  const copyWholeBtn = document.getElementById('copyWholeBtn');
+  const invisibleNote = document.getElementById('invisibleNote');
+
+  const formatSelect = document.getElementById('formatSelect');
+  const bgColor = document.getElementById('bgColor');
+  const trimToggle = document.getElementById('trimToggle');
+  const filenameInput = document.getElementById('filenameInput');
+  const saveBtn = document.getElementById('saveBtn');
+  const saveNote = document.getElementById('saveNote');
+  const copyBtn = document.getElementById('copyBtn');
+  const copyNote = document.getElementById('copyNote');
+
+  // ---------- State ----------
+  const WORK_MAX = 1400; // longest side, px, for mask computation
+  let originalCanvas = document.createElement('canvas'); // full-res source pixels
+  let originalCtx = originalCanvas.getContext('2d', { willReadFrequently:true });
+  let workCanvas = document.createElement('canvas');      // downscaled working copy
+  let workCtx = workCanvas.getContext('2d', { willReadFrequently:true });
+  let workW = 0, workH = 0, scaleWorkToOrig = 1;
+  let workImageData = null, workRGB = null;   // Uint8ClampedArray view
+  let edgeMag = null;                          // Float32Array, workW*workH
+  let mask = null;                             // Uint8ClampedArray 0/255, workW*workH
+  let displayScale = 1;                        // work-canvas px -> stage screen px (CSS px)
+  let baseFileName = 'photo';
+
+  let mode = 'add';          // add | remove | brush | pan
+  let brushMode = 'add';     // add | erase
+  let points = [];           // {x,y,label} in work coords, for badge/undo bookkeeping
+  let history = [];          // stack of Uint8ClampedArray mask snapshots
+  const HISTORY_CAP = 25;
+
+  let isPointerDown = false;
+  let panStart = null;
+
+  // ---------- Utility ----------
+  function toast(msg, isErr){
+    const t = document.createElement('div');
+    t.className = 'toast' + (isErr ? ' err' : '');
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(()=>{ t.remove(); }, isErr ? 4200 : 2600);
+  }
+
+  function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+
+  // ---------- Hints: hover shows the native title tooltip on desktop; on touch,
+  // where hover doesn't exist, a long-press shows the same text as a small bubble.
+  // Every button carries its explanation in its title attribute instead of a
+  // permanent on-screen instruction, and that's the single source for both.
+  (function initLongPressHints(){
+    let timer = null, bubble = null, moved = false;
+    function show(target){
+      const text = target.getAttribute('title');
+      if(!text) return;
+      hide();
+      bubble = document.createElement('div');
+      bubble.className = 'hintBubble';
+      bubble.textContent = text;
+      document.body.appendChild(bubble);
+      const r = target.getBoundingClientRect();
+      const bw = bubble.offsetWidth, bh = bubble.offsetHeight;
+      bubble.style.left = clamp(r.left, 8, window.innerWidth-bw-8) + 'px';
+      bubble.style.top = Math.max(8, r.top - bh - 8) + 'px';
+    }
+    function hide(){ if(bubble){ bubble.remove(); bubble=null; } }
+    document.addEventListener('touchstart', (e)=>{
+      const target = e.target.closest('[title]');
+      clearTimeout(timer);
+      hide();
+      if(!target) return;
+      moved = false;
+      timer = setTimeout(()=>{ if(!moved) show(target); }, 480);
+    }, { passive:true });
+    document.addEventListener('touchmove', ()=>{ moved = true; clearTimeout(timer); }, { passive:true });
+    document.addEventListener('touchend', ()=>{ clearTimeout(timer); if(bubble) setTimeout(hide, 1600); }, { passive:true });
+    document.addEventListener('touchcancel', ()=>{ clearTimeout(timer); hide(); }, { passive:true });
+    // A long-press that revealed a hint shouldn't also fire the element's click / open a text-selection menu.
+    document.addEventListener('contextmenu', (e)=>{ if(bubble) e.preventDefault(); });
+  })();
+
+  // ---------- Image loading ----------
+  function resetEditorState(){
+    points = []; history = [];
+    undoBtn.disabled = true;
+    pointCountBadge.textContent = '0 points';
+    emptyReview.style.display = 'block';
+    reviewCanvas.style.display = 'none';
+    saveBtn.disabled = true;
+    copyBtn.disabled = true;
+    copyNote.textContent = '';
+    placeBtn.disabled = true;
+    saveWholeBtn.disabled = false;
+    copyWholeBtn.disabled = false;
+    invisibleNote.textContent = '';
+  }
+
+  async function loadImageSource(source, name){
+    let bitmap;
+    try{
+      bitmap = await createImageBitmap(source);
+    }catch(err){
+      toast('Could not read that as an image. Try a different file or a direct image URL.', true);
+      return;
+    }
+    baseFileName = (name || 'photo').replace(/\.[a-z0-9]+$/i,'') || 'photo';
+    originalCanvas.width = bitmap.width;
+    originalCanvas.height = bitmap.height;
+    originalCtx.clearRect(0,0,bitmap.width,bitmap.height);
+    originalCtx.drawImage(bitmap,0,0);
+
+    // Verify pixel access isn't tainted (CORS-blocked cross-origin image)
+    try{
+      originalCtx.getImageData(0,0,1,1);
+    }catch(err){
+      toast('This image blocks pixel access from this site (cross-origin protection). Save it to your device and upload the file instead.', true);
+      return;
+    }
+
+    const longest = Math.max(bitmap.width, bitmap.height);
+    const s = Math.min(1, WORK_MAX / longest);
+    workW = Math.max(1, Math.round(bitmap.width * s));
+    workH = Math.max(1, Math.round(bitmap.height * s));
+    scaleWorkToOrig = bitmap.width / workW;
+
+    workCanvas.width = workW; workCanvas.height = workH;
+    workCtx.drawImage(originalCanvas, 0, 0, workW, workH);
+    workImageData = workCtx.getImageData(0,0,workW,workH);
+    workRGB = workImageData.data;
+
+    edgeMag = computeEdgeMagnitude(workRGB, workW, workH);
+    mask = new Uint8ClampedArray(workW*workH); // all 0
+
+    resetEditorState();
+    uploadScreen.style.display = 'none';
+    editorScreen.style.display = 'block';
+    startOverBtn.style.display = 'inline-block';
+
+    zoomSlider.value = 100;
+    fitStageCanvas();
+    renderStage();
+    renderReview();
+    stageDims.textContent = bitmap.width + '×' + bitmap.height;
+    stageStatus.textContent = baseFileName;
+    filenameInput.value = baseFileName + '-cutout';
+  }
+
+  fileInput.addEventListener('change', (e)=>{
+    const f = e.target.files && e.target.files[0];
+    if(f) loadImageSource(f, f.name);
+  });
+  dropzone.addEventListener('click', ()=> fileInput.click());
+  dropzone.addEventListener('dragover', (e)=>{ e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', ()=> dropzone.classList.remove('drag'));
+  dropzone.addEventListener('drop', (e)=>{
+    e.preventDefault(); dropzone.classList.remove('drag');
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f) loadImageSource(f, f.name);
+  });
+  window.addEventListener('paste', (e)=>{
+    if(uploadScreen.style.display === 'none') return;
+    const items = e.clipboardData && e.clipboardData.items;
+    if(!items) return;
+    for(const it of items){
+      if(it.type && it.type.startsWith('image/')){
+        const f = it.getAsFile();
+        if(f){ loadImageSource(f, 'pasted-image'); return; }
+      }
+    }
+  });
+
+  async function loadFromUrl(url){
+    if(!url) return;
+    try{
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      const loaded = new Promise((res, rej)=>{
+        img.onload = ()=>res(img);
+        img.onerror = ()=>rej(new Error('load failed'));
+      });
+      img.src = url;
+      const im = await loaded;
+      const name = (url.split('/').pop() || 'web-photo').split('?')[0];
+      await loadImageSource(im, name);
+    }catch(err){
+      toast('Could not load that URL as an image (it may block hotlinking). Try saving it to your device and uploading it instead.', true);
+    }
+  }
+  loadUrlBtn.addEventListener('click', ()=> loadFromUrl(urlInput.value.trim()));
+  urlInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') loadFromUrl(urlInput.value.trim()); });
+
+  startOverBtn.addEventListener('click', ()=>{
+    editorScreen.style.display = 'none';
+    document.getElementById('placeScreen').style.display = 'none';
+    uploadScreen.style.display = 'flex';
+    startOverBtn.style.display = 'none';
+    fileInput.value = ''; urlInput.value = '';
+  });
+
+  // ---------- Edge magnitude (Sobel on luminance) ----------
+  function computeEdgeMagnitude(rgba, w, h){
+    const lum = new Float32Array(w*h);
+    for(let i=0, p=0; i<w*h; i++, p+=4){
+      lum[i] = 0.299*rgba[p] + 0.587*rgba[p+1] + 0.114*rgba[p+2];
+    }
+    const mag = new Float32Array(w*h);
+    for(let y=1; y<h-1; y++){
+      for(let x=1; x<w-1; x++){
+        const i = y*w+x;
+        const gx = -lum[i-w-1] - 2*lum[i-1] - lum[i+w-1] + lum[i-w+1] + 2*lum[i+1] + lum[i+w+1];
+        const gy = -lum[i-w-1] - 2*lum[i-w] - lum[i-w+1] + lum[i+w-1] + 2*lum[i+w] + lum[i+w+1];
+        mag[i] = Math.sqrt(gx*gx + gy*gy);
+      }
+    }
+    return mag;
+  }
+
+  // ---------- Region growing (edge-gated flood fill) ----------
+  function colorDist(rgba, i1, i2){
+    const p1=i1*4, p2=i2*4;
+    const dr = rgba[p1]-rgba[p2], dg = rgba[p1+1]-rgba[p2+1], db = rgba[p1+2]-rgba[p2+2];
+    return Math.sqrt(dr*dr+dg*dg+db*db);
+  }
+
+  function regionGrow(seedX, seedY){
+    const sens = parseInt(sensSlider.value,10); // 5..70
+    const edgeThreshold = 18 + sens * 3.2;       // higher sensitivity -> crosses stronger edges
+    const colorTolerance = 14 + sens * 1.6;
+
+    const w=workW, h=workH;
+    const seedI = seedY*w+seedX;
+    const visited = new Uint8Array(w*h);
+    const out = new Uint8ClampedArray(w*h);
+    const stack = new Int32Array(w*h);
+    let sp = 0;
+    stack[sp++] = seedI;
+    visited[seedI] = 1;
+
+    while(sp>0){
+      const i = stack[--sp];
+      out[i] = 255;
+      const x = i % w, y = (i / w) | 0;
+      // 4-connected neighbors
+      const neigh = [
+        (x>0) ? i-1 : -1,
+        (x<w-1) ? i+1 : -1,
+        (y>0) ? i-w : -1,
+        (y<h-1) ? i+w : -1,
+      ];
+      for(let k=0;k<4;k++){
+        const ni = neigh[k];
+        if(ni<0 || visited[ni]) continue;
+        if(edgeMag[ni] > edgeThreshold) { visited[ni]=1; continue; }
+        if(colorDist(workRGB, seedI, ni) > colorTolerance*2.2){ visited[ni]=1; continue; }
+        if(colorDist(workRGB, i, ni) > colorTolerance){ visited[ni]=1; continue; }
+        visited[ni] = 1;
+        stack[sp++] = ni;
+      }
+    }
+    return out;
+  }
+
+  // simple 2-pass box blur for feathered mask edges
+  function featherMask(src, w, h, radius){
+    const r = Math.round(radius);
+    if(r<=0) return src.slice();
+    const tmp = new Float32Array(w*h);
+    const out = new Uint8ClampedArray(w*h);
+    for(let y=0;y<h;y++){
+      let sum=0;
+      for(let x=-r;x<=r;x++){ sum += src[y*w+clamp(x,0,w-1)]; }
+      for(let x=0;x<w;x++){
+        tmp[y*w+x] = sum/(2*r+1);
+        const addX = clamp(x+r+1,0,w-1), subX = clamp(x-r,0,w-1);
+        sum += src[y*w+addX] - src[y*w+subX];
+      }
+    }
+    for(let x=0;x<w;x++){
+      let sum=0;
+      for(let y=-r;y<=r;y++){ sum += tmp[clamp(y,0,h-1)*w+x]; }
+      for(let y=0;y<h;y++){
+        out[y*w+x] = sum/(2*r+1);
+        const addY = clamp(y+r+1,0,h-1), subY = clamp(y-r,0,h-1);
+        sum += tmp[addY*w+x] - tmp[subY*w+x];
+      }
+    }
+    return out;
+  }
+
+  // ---------- Invisible mode: on-device inpainting ----------
+  // Extract/apply a small rectangular sub-region of an RGBA buffer, so undo for an
+  // Invisible-mode edit only has to remember the patch it touched, not the whole photo.
+  function extractPatch(rgba, W, x, y, w, h){
+    const data = new Uint8ClampedArray(w*h*4);
+    for(let row=0; row<h; row++){
+      const srcStart = ((y+row)*W + x) * 4;
+      data.set(rgba.subarray(srcStart, srcStart + w*4), row*w*4);
+    }
+    return { x, y, w, h, data };
+  }
+  function applyPatch(rgba, W, patch){
+    for(let row=0; row<patch.h; row++){
+      const dstStart = ((patch.y+row)*W + patch.x) * 4;
+      rgba.set(patch.data.subarray(row*patch.w*4, (row+1)*patch.w*4), dstStart);
+    }
+  }
+
+  function bilinearSample(rgba, w, h, fx, fy){
+    fx = clamp(fx, 0, w-1); fy = clamp(fy, 0, h-1);
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const x1 = Math.min(w-1,x0+1), y1 = Math.min(h-1,y0+1);
+    const tx = fx-x0, ty = fy-y0;
+    const i00=(y0*w+x0)*4, i10=(y0*w+x1)*4, i01=(y1*w+x0)*4, i11=(y1*w+x1)*4;
+    const out = [0,0,0];
+    for(let c=0;c<3;c++){
+      const top = rgba[i00+c]*(1-tx) + rgba[i10+c]*tx;
+      const bot = rgba[i01+c]*(1-tx) + rgba[i11+c]*tx;
+      out[c] = top*(1-ty) + bot*ty;
+    }
+    return out;
+  }
+
+  // Harmonic (Jacobi) diffusion fill: each masked pixel converges toward the average
+  // of its neighbors, so color/light gradients from the surrounding photo propagate
+  // smoothly into the hole. Good for plain walls, floors, and soft gradients; won't
+  // reconstruct sharp patterns or texture detail behind the object.
+  function diffuseLevel(level, iterations, seedWithGlobalAverage){
+    const { w, h, rgba, mask } = level;
+    if(seedWithGlobalAverage){
+      let r=0,g=0,b=0,cnt=0;
+      for(let i=0;i<w*h;i++){ if(!mask[i]){ r+=rgba[i*4]; g+=rgba[i*4+1]; b+=rgba[i*4+2]; cnt++; } }
+      const ar = cnt? r/cnt : 128, ag = cnt? g/cnt : 128, ab = cnt? b/cnt : 128;
+      for(let i=0;i<w*h;i++){ if(mask[i]>0){ const p=i*4; rgba[p]=ar; rgba[p+1]=ag; rgba[p+2]=ab; rgba[p+3]=255; } }
+    }
+    let buf = new Uint8ClampedArray(rgba.length);
+    buf.set(rgba);
+    let src = rgba, dst = buf;
+    for(let it=0; it<iterations; it++){
+      for(let y=0;y<h;y++){
+        for(let x=0;x<w;x++){
+          const i = y*w+x, p = i*4;
+          if(mask[i]===0){ dst[p]=src[p]; dst[p+1]=src[p+1]; dst[p+2]=src[p+2]; dst[p+3]=255; continue; }
+          let r=0,g=0,b=0,n=0;
+          if(x>0){ const j=(i-1)*4; r+=src[j];g+=src[j+1];b+=src[j+2];n++; }
+          if(x<w-1){ const j=(i+1)*4; r+=src[j];g+=src[j+1];b+=src[j+2];n++; }
+          if(y>0){ const j=(i-w)*4; r+=src[j];g+=src[j+1];b+=src[j+2];n++; }
+          if(y<h-1){ const j=(i+w)*4; r+=src[j];g+=src[j+1];b+=src[j+2];n++; }
+          dst[p]=n?r/n:src[p]; dst[p+1]=n?g/n:src[p+1]; dst[p+2]=n?b/n:src[p+2]; dst[p+3]=255;
+        }
+      }
+      const tmp = src; src = dst; dst = tmp;
+    }
+    if(src!==rgba) rgba.set(src);
+  }
+
+  function diffusionInpaint(rgba, mask, w, h){
+    const levels = [{ w, h, rgba, mask }];
+    let cw=w, ch=h, crgba=rgba, cmask=mask;
+    while(Math.min(cw,ch) > 24 && levels.length < 8){
+      const nw = Math.max(1,cw>>1), nh = Math.max(1,ch>>1);
+      const nrgba = new Uint8ClampedArray(nw*nh*4), nmask = new Uint8ClampedArray(nw*nh);
+      for(let y=0;y<nh;y++){
+        for(let x=0;x<nw;x++){
+          let r=0,g=0,b=0,cnt=0,anyMask=0;
+          for(let dy=0;dy<2;dy++){
+            for(let dx=0;dx<2;dx++){
+              const sx=Math.min(cw-1,x*2+dx), sy=Math.min(ch-1,y*2+dy), si=sy*cw+sx;
+              if(cmask[si]>0) anyMask=1;
+              r+=crgba[si*4]; g+=crgba[si*4+1]; b+=crgba[si*4+2]; cnt++;
+            }
+          }
+          const ni=y*nw+x;
+          nrgba[ni*4]=r/cnt; nrgba[ni*4+1]=g/cnt; nrgba[ni*4+2]=b/cnt; nrgba[ni*4+3]=255;
+          nmask[ni]=anyMask?255:0;
+        }
+      }
+      levels.push({ w:nw, h:nh, rgba:nrgba, mask:nmask });
+      cw=nw; ch=nh; crgba=nrgba; cmask=nmask;
+    }
+    diffuseLevel(levels[levels.length-1], 250, true);
+    for(let li=levels.length-2; li>=0; li--){
+      const coarse = levels[li+1], fine = levels[li];
+      for(let y=0;y<fine.h;y++){
+        for(let x=0;x<fine.w;x++){
+          const fi = y*fine.w+x;
+          if(fine.mask[fi]===0) continue;
+          const cx = (x+0.5)*coarse.w/fine.w - 0.5, cy = (y+0.5)*coarse.h/fine.h - 0.5;
+          const [r,g,b] = bilinearSample(coarse.rgba, coarse.w, coarse.h, cx, cy);
+          const p=fi*4; fine.rgba[p]=r; fine.rgba[p+1]=g; fine.rgba[p+2]=b; fine.rgba[p+3]=255;
+        }
+      }
+      diffuseLevel(fine, li===0 ? 60 : 40, false);
+    }
+  }
+
+  // Tap an object in Invisible mode: find it (same region-grow as Select), fill it in
+  // via diffusionInpaint on a padded local crop, blend the result back in with a
+  // feathered edge, and write through to both the work-res buffer and the full-res
+  // original canvas (upscaled) so exports reflect the edit.
+  // Grows a binary mask outward by `iterations` pixels (4-connected). Region-grow's
+  // edge-magnitude gate stops just short of a true silhouette on an anti-aliased edge,
+  // leaving a thin rim of the original object color -- dilating a couple of pixels
+  // before inpainting makes sure that rim gets overwritten too.
+  function dilateMask(mask, w, h, iterations){
+    let cur = mask;
+    for(let it=0; it<iterations; it++){
+      const next = cur.slice();
+      for(let y=0;y<h;y++){
+        for(let x=0;x<w;x++){
+          const i = y*w+x;
+          if(cur[i]>0) continue;
+          if((x>0&&cur[i-1]>0)||(x<w-1&&cur[i+1]>0)||(y>0&&cur[i-w]>0)||(y<h-1&&cur[i+w]>0)) next[i]=255;
+        }
+      }
+      cur = next;
+    }
+    return cur;
+  }
+
+  function eraseObjectAt(x, y){
+    const region = regionGrow(x, y);
+    const bbox = bboxOfMask(region, workW, workH, 1);
+    if(!bbox) return null;
+    const pad = Math.round(Math.max(bbox.w, bbox.h) * 0.6);
+    const cx0 = clamp(bbox.minX-pad, 0, workW-1), cy0 = clamp(bbox.minY-pad, 0, workH-1);
+    const cx1 = clamp(bbox.maxX+pad, 0, workW-1), cy1 = clamp(bbox.maxY+pad, 0, workH-1);
+    const cw = cx1-cx0+1, ch = cy1-cy0+1;
+
+    const workPatchBefore = extractPatch(workRGB, workW, cx0, cy0, cw, ch);
+    const cropRGBA = workPatchBefore.data.slice();
+    const cropMask = new Uint8ClampedArray(cw*ch);
+    for(let ly=0; ly<ch; ly++){
+      for(let lx=0; lx<cw; lx++){
+        if(region[(cy0+ly)*workW+(cx0+lx)] > 20) cropMask[ly*cw+lx] = 255;
+      }
+    }
+    const dilatedCropMask = dilateMask(cropMask, cw, ch, 3);
+    diffusionInpaint(cropRGBA, dilatedCropMask, cw, ch);
+    const featheredCropMask = featherMask(dilatedCropMask, cw, ch, 2);
+
+    for(let i=0;i<cw*ch;i++){
+      const a = featheredCropMask[i]/255;
+      if(a<=0) continue;
+      const p=i*4;
+      cropRGBA[p]   = cropRGBA[p]*a   + workPatchBefore.data[p]*(1-a);
+      cropRGBA[p+1] = cropRGBA[p+1]*a + workPatchBefore.data[p+1]*(1-a);
+      cropRGBA[p+2] = cropRGBA[p+2]*a + workPatchBefore.data[p+2]*(1-a);
+      cropRGBA[p+3] = 255;
+    }
+
+    // Full-res original: capture its matching (scaled) region before edit, then paint
+    // the upscaled inpainted crop over it.
+    const sx = originalCanvas.width/workW, sy = originalCanvas.height/workH;
+    const ox = Math.round(cx0*sx), oy = Math.round(cy0*sy);
+    const ow = Math.max(1, Math.round(cw*sx)), oh = Math.max(1, Math.round(ch*sy));
+    const origPatchBefore = { x: ox, y: oy, imageData: originalCtx.getImageData(ox, oy, ow, oh) };
+
+    applyPatch(workRGB, workW, { x:cx0, y:cy0, w:cw, h:ch, data:cropRGBA });
+
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = cw; cropCanvas.height = ch;
+    cropCanvas.getContext('2d').putImageData(new ImageData(cropRGBA, cw, ch), 0, 0);
+    originalCtx.drawImage(cropCanvas, ox, oy, ow, oh);
+
+    edgeMag = computeEdgeMagnitude(workRGB, workW, workH);
+    pushPhotoHistory(workPatchBefore, origPatchBefore);
+    return true;
+  }
+
+  // ---------- History ----------
+  // Two kinds of undoable action share one chronological stack:
+  //  'mask'  -- a selection edit (add/remove/brush click), snapshots the whole work-res mask.
+  //  'photo' -- an Invisible-mode erase, snapshots only the small bounding box it touched
+  //             (in both work-res and full-res pixels), since the base photo can be large.
+  function pushHistory(){
+    if(!mask) return;
+    history.push({ type:'mask', mask: mask.slice() });
+    if(history.length > HISTORY_CAP) history.shift();
+    undoBtn.disabled = false;
+  }
+  function pushPhotoHistory(workPatch, origPatch){
+    history.push({ type:'photo', workPatch, origPatch });
+    if(history.length > HISTORY_CAP) history.shift();
+    undoBtn.disabled = false;
+  }
+  undoBtn.addEventListener('click', ()=>{
+    if(!history.length) return;
+    const entry = history.pop();
+    if(entry.type==='mask'){
+      mask = entry.mask;
+      if(points.length) points.pop();
+      pointCountBadge.textContent = points.length + ' point' + (points.length===1?'':'s');
+    } else if(entry.type==='photo'){
+      applyPatch(workRGB, workW, entry.workPatch);
+      originalCtx.putImageData(entry.origPatch.imageData, entry.origPatch.x, entry.origPatch.y);
+      edgeMag = computeEdgeMagnitude(workRGB, workW, workH);
+    }
+    undoBtn.disabled = history.length===0;
+    renderStage(); renderReview();
+  });
+  clearMaskBtn.addEventListener('click', ()=>{
+    if(!mask) return;
+    pushHistory();
+    mask = new Uint8ClampedArray(workW*workH);
+    points = [];
+    pointCountBadge.textContent = '0 points';
+    renderStage(); renderReview();
+  });
+
+  // ---------- Mode toggles ----------
+  modeGroup.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-mode]');
+    if(!btn) return;
+    mode = btn.dataset.mode;
+    [...modeGroup.children].forEach(b=>b.classList.toggle('active', b===btn));
+    const isBrush = mode==='brush';
+    brushSizeRow.style.display = isBrush ? 'flex' : 'none';
+    brushModeGroup.style.display = isBrush ? 'flex' : 'none';
+    brushDivider.style.display = isBrush ? 'block' : 'none';
+    stageCanvas.classList.toggle('eraseMode', mode==='remove');
+    stageCanvas.classList.toggle('panMode', mode==='pan');
+  });
+  brushModeGroup.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-brushmode]');
+    if(!btn) return;
+    brushMode = btn.dataset.brushmode;
+    [...brushModeGroup.children].forEach(b=>b.classList.toggle('active', b===btn));
+  });
+
+  // ---------- Stage rendering ----------
+  function fitStageCanvas(){
+    const zoom = parseInt(zoomSlider.value,10)/100;
+    displayScale = zoom;
+    stageCanvas.width = workW;
+    stageCanvas.height = workH;
+    stageCanvas.style.width = Math.round(workW*zoom) + 'px';
+    stageCanvas.style.height = Math.round(workH*zoom) + 'px';
+  }
+  zoomSlider.addEventListener('input', fitStageCanvas);
+
+  function renderStage(){
+    stageCtx.putImageData(workImageData, 0, 0);
+    if(mask){
+      // Tint selected area with a translucent accent overlay so the user can see the selection
+      const overlay = stageCtx.getImageData(0,0,workW,workH);
+      const d = overlay.data;
+      for(let i=0;i<workW*workH;i++){
+        if(mask[i] > 40){
+          const p=i*4;
+          d[p]   = d[p]*0.55 + 64*0.45;
+          d[p+1] = d[p+1]*0.55 + 208*0.45;
+          d[p+2] = d[p+2]*0.55 + 181*0.45;
+        }
+      }
+      stageCtx.putImageData(overlay,0,0);
+    }
+  }
+
+  function bboxOfMask(m, w, h, pad){
+    let minX=w, minY=h, maxX=-1, maxY=-1;
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        if(m[y*w+x] > 20){
+          if(x<minX) minX=x; if(x>maxX) maxX=x;
+          if(y<minY) minY=y; if(y>maxY) maxY=y;
+        }
+      }
+    }
+    if(maxX<0) return null;
+    minX = clamp(minX-pad,0,w-1); minY = clamp(minY-pad,0,h-1);
+    maxX = clamp(maxX+pad,0,w-1); maxY = clamp(maxY+pad,0,h-1);
+    return {minX,minY,maxX,maxY,w:maxX-minX+1,h:maxY-minY+1};
+  }
+
+  function buildFinalCutout(){
+    // Upscale mask (feathered) to original resolution and composite alpha onto original pixels.
+    if(!mask) return null;
+    const feathered = featherMask(mask, workW, workH, 1.4);
+    const ow = originalCanvas.width, oh = originalCanvas.height;
+
+    // Render feathered mask into a work-size canvas, then scale up via drawImage (bilinear)
+    const maskWorkCanvas = document.createElement('canvas');
+    maskWorkCanvas.width = workW; maskWorkCanvas.height = workH;
+    const mctx = maskWorkCanvas.getContext('2d');
+    const mImg = mctx.createImageData(workW, workH);
+    for(let i=0;i<workW*workH;i++){
+      const v = feathered[i];
+      mImg.data[i*4]=255; mImg.data[i*4+1]=255; mImg.data[i*4+2]=255; mImg.data[i*4+3]=v;
+    }
+    mctx.putImageData(mImg,0,0);
+
+    const maskFullCanvas = document.createElement('canvas');
+    maskFullCanvas.width = ow; maskFullCanvas.height = oh;
+    const mfctx = maskFullCanvas.getContext('2d');
+    mfctx.imageSmoothingEnabled = true;
+    mfctx.drawImage(maskWorkCanvas, 0, 0, ow, oh);
+    const maskFullData = mfctx.getImageData(0,0,ow,oh).data;
+
+    const origData = originalCtx.getImageData(0,0,ow,oh);
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = ow; outCanvas.height = oh;
+    const outCtx = outCanvas.getContext('2d');
+    const outImg = outCtx.createImageData(ow, oh);
+    for(let i=0;i<ow*oh;i++){
+      const p=i*4;
+      outImg.data[p]   = origData.data[p];
+      outImg.data[p+1] = origData.data[p+1];
+      outImg.data[p+2] = origData.data[p+2];
+      outImg.data[p+3] = maskFullData[p+3];
+    }
+    outCtx.putImageData(outImg,0,0);
+
+    if(!trimToggle.checked) return outCanvas;
+
+    const bbox = bboxOfMask(mask, workW, workH, Math.max(4, Math.round(workW*0.01)));
+    if(!bbox) return outCanvas;
+    const sx = ow/workW, sy = oh/workH;
+    const fx = Math.round(bbox.minX*sx), fy = Math.round(bbox.minY*sy);
+    const fw = Math.max(1, Math.round(bbox.w*sx)), fh = Math.max(1, Math.round(bbox.h*sy));
+    const trimmed = document.createElement('canvas');
+    trimmed.width = fw; trimmed.height = fh;
+    trimmed.getContext('2d').drawImage(outCanvas, fx, fy, fw, fh, 0, 0, fw, fh);
+    return trimmed;
+  }
+
+  let renderReviewQueued = false;
+  function renderReview(){
+    if(renderReviewQueued) return;
+    renderReviewQueued = true;
+    requestAnimationFrame(()=>{
+      renderReviewQueued = false;
+      const hasContent = mask && mask.some(v=>v>20);
+      if(!hasContent){
+        emptyReview.style.display='block';
+        reviewCanvas.style.display='none';
+        saveBtn.disabled = true;
+        copyBtn.disabled = true;
+        placeBtn.disabled = true;
+        return;
+      }
+      const cut = buildFinalCutout();
+      if(!cut){ return; }
+      reviewCanvas.width = cut.width; reviewCanvas.height = cut.height;
+      reviewCtx.clearRect(0,0,cut.width,cut.height);
+      reviewCtx.drawImage(cut,0,0);
+      emptyReview.style.display='none';
+      reviewCanvas.style.display='block';
+      saveBtn.disabled = false;
+      copyBtn.disabled = false;
+      placeBtn.disabled = false;
+    });
+  }
+
+  // ---------- Pointer interaction on stage ----------
+  function stageCoordsFromEvent(e){
+    const rect = stageCanvas.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) * (stageCanvas.width/rect.width);
+    const cy = (e.clientY - rect.top) * (stageCanvas.height/rect.height);
+    return { x: clamp(Math.round(cx),0,workW-1), y: clamp(Math.round(cy),0,workH-1) };
+  }
+
+  function applyBrush(x, y){
+    const r = parseInt(brushSlider.value,10);
+    const val = brushMode==='add' ? 255 : 0;
+    const r2 = r*r;
+    const minX=clamp(x-r,0,workW-1), maxX=clamp(x+r,0,workW-1);
+    const minY=clamp(y-r,0,workH-1), maxY=clamp(y+r,0,workH-1);
+    for(let yy=minY; yy<=maxY; yy++){
+      for(let xx=minX; xx<=maxX; xx++){
+        const dx=xx-x, dy=yy-y;
+        if(dx*dx+dy*dy<=r2) mask[yy*workW+xx]=val;
+      }
+    }
+  }
+
+  let brushStrokeActive = false;
+
+  stageCanvas.addEventListener('pointerdown', (e)=>{
+    if(!mask) return;
+    try{ stageCanvas.setPointerCapture(e.pointerId); }catch(err){ /* no-op: capture is a nicety, not required for the click to register */ }
+    isPointerDown = true;
+
+    if(mode==='pan'){
+      panStart = { x:e.clientX, y:e.clientY, sl:stageScroll.scrollLeft, st:stageScroll.scrollTop };
+      return;
+    }
+    const {x,y} = stageCoordsFromEvent(e);
+
+    if(mode==='brush'){
+      pushHistory();
+      brushStrokeActive = true;
+      applyBrush(x,y);
+      renderStage();
+      return;
+    }
+
+    if(mode==='invisible'){
+      isPointerDown = false;
+      stageStatus.textContent = 'Erasing…';
+      // Yield one frame so the status text actually paints before the
+      // synchronous diffusion fill blocks the main thread.
+      requestAnimationFrame(()=>{ setTimeout(()=>{
+        const ok = eraseObjectAt(x,y);
+        stageStatus.textContent = baseFileName;
+        if(!ok){ toast('Nothing there to erase.'); return; }
+        renderStage();
+        renderReview();
+      }, 0); });
+      return;
+    }
+
+    pushHistory();
+    const region = regionGrow(x,y);
+    if(mode==='add'){
+      for(let i=0;i<mask.length;i++) if(region[i]) mask[i]=255;
+      points.push({x,y,label:1});
+    } else if(mode==='remove'){
+      for(let i=0;i<mask.length;i++) if(region[i]) mask[i]=0;
+      points.push({x,y,label:0});
+    }
+    pointCountBadge.textContent = points.length + ' point' + (points.length===1?'':'s');
+    renderStage();
+    renderReview();
+  });
+
+  stageCanvas.addEventListener('pointermove', (e)=>{
+    if(!isPointerDown || !mask) return;
+    if(mode==='pan' && panStart){
+      stageScroll.scrollLeft = panStart.sl - (e.clientX-panStart.x);
+      stageScroll.scrollTop = panStart.st - (e.clientY-panStart.y);
+      return;
+    }
+    if(mode==='brush' && brushStrokeActive){
+      const {x,y} = stageCoordsFromEvent(e);
+      applyBrush(x,y);
+      renderStage();
+    }
+  });
+
+  function endPointer(){
+    if(brushStrokeActive){ brushStrokeActive=false; renderReview(); }
+    isPointerDown = false; panStart = null;
+  }
+  stageCanvas.addEventListener('pointerup', endPointer);
+  stageCanvas.addEventListener('pointercancel', endPointer);
+  stageCanvas.addEventListener('pointerleave', ()=>{ if(mode!=='brush') endPointer(); });
+
+  sensSlider.addEventListener('change', ()=>{ /* affects next click only, no live recompute needed */ });
+
+  // ---------- Pop-out review window ----------
+  popoutBtn.addEventListener('click', ()=>{
+    if(!mask || !mask.some(v=>v>20)){ toast('Isolate an object first.'); return; }
+    const cut = buildFinalCutout();
+    const dataUrl = cut.toDataURL('image/png');
+    const w = window.open('', '_blank', 'width=520,height=620');
+    if(!w){ toast('Your browser blocked the pop-out window. The Review panel on the right still shows the live result.', true); return; }
+    w.document.write(
+      '<!DOCTYPE html><html><head><title>PhotoDesigner — Review</title><style>'+
+      'body{margin:0;background:#191b1f;display:flex;align-items:center;justify-content:center;min-height:100vh;'+
+      'background-image:linear-gradient(45deg,#0e1013 25%,transparent 25%),linear-gradient(-45deg,#0e1013 25%,transparent 25%),'+
+      'linear-gradient(45deg,transparent 75%,#0e1013 75%),linear-gradient(-45deg,transparent 75%,#0e1013 75%);'+
+      'background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0px;}'+
+      'img{max-width:96vw;max-height:96vh;}</style></head><body>'+
+      '<img src="'+dataUrl+'"></body></html>'
+    );
+    w.document.close();
+  });
+
+  // ---------- Save As / Copy (shared helpers) ----------
+  formatSelect.addEventListener('change', ()=>{
+    bgColor.style.display = formatSelect.value==='jpeg' ? 'inline-block' : 'none';
+  });
+
+  function mimeFor(fmt){
+    return fmt==='png' ? 'image/png' : fmt==='webp' ? 'image/webp' : 'image/jpeg';
+  }
+  function extFor(fmt){
+    return fmt==='png' ? 'png' : fmt==='webp' ? 'webp' : 'jpg';
+  }
+
+  async function canvasToBlob(srcCanvas, fmt, flattenBg){
+    let canvas = srcCanvas;
+    if(fmt==='jpeg'){
+      const flat = document.createElement('canvas');
+      flat.width = srcCanvas.width; flat.height = srcCanvas.height;
+      const fctx = flat.getContext('2d');
+      fctx.fillStyle = flattenBg || '#ffffff';
+      fctx.fillRect(0,0,flat.width,flat.height);
+      fctx.drawImage(srcCanvas,0,0);
+      canvas = flat;
+    }
+    const mime = mimeFor(fmt);
+    const quality = fmt==='jpeg' ? 0.92 : undefined;
+    return new Promise((resolve)=>{
+      canvas.toBlob((blob)=>{
+        if(blob) return resolve(blob);
+        canvas.toBlob((b2)=>resolve(b2), 'image/png'); // format unsupported -> fall back to PNG
+      }, mime, quality);
+    });
+  }
+
+  async function saveBlobAs(blob, fmt, suggestedBaseName, noteEl){
+    const ext = extFor(fmt);
+    let name = suggestedBaseName || 'cutout';
+    if(!name.toLowerCase().endsWith('.'+ext)) name += '.'+ext;
+
+    if(window.showSaveFilePicker){
+      try{
+        const handle = await window.showSaveFilePicker({
+          suggestedName: name,
+          types: [{ description: ext.toUpperCase()+' image', accept: { [mimeFor(fmt)]: ['.'+ext] } }]
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        if(noteEl) noteEl.textContent = 'Saved.';
+        toast('Saved to the location you chose.');
+        return;
+      }catch(err){
+        if(err && err.name === 'AbortError'){ if(noteEl) noteEl.textContent=''; return; }
+        // fall through to other strategies
+      }
+    }
+
+    const file = new File([blob], name, { type: blob.type });
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      try{
+        await navigator.share({ files:[file], title:name });
+        if(noteEl) noteEl.textContent = 'Shared — choose Save to Files/Photos.';
+        return;
+      }catch(err){
+        if(err && err.name==='AbortError') return;
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    if(noteEl) noteEl.textContent = 'Downloaded to your browser\'s default Downloads folder.';
+  }
+
+  async function copyCanvasToClipboard(canvas, noteEl){
+    if(!(navigator.clipboard && window.ClipboardItem)){
+      toast('This browser doesn\'t support copying images to the clipboard. Use Save As instead.', true);
+      return;
+    }
+    try{
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+      if(!blob) throw new Error('Could not encode image');
+      await navigator.clipboard.write([ new ClipboardItem({ [blob.type]: blob }) ]);
+      if(noteEl) noteEl.textContent = 'Copied — paste it (Ctrl/Cmd+V) into another photo or document.';
+      toast('Copied to clipboard.');
+    }catch(err){
+      console.error(err);
+      if(noteEl) noteEl.textContent = '';
+      toast('Copy failed: ' + (err && err.message ? err.message : err) + '. Use Save As instead.', true);
+    }
+  }
+
+  saveBtn.addEventListener('click', async ()=>{
+    saveBtn.disabled = true;
+    const originalLabel = saveBtn.textContent;
+    saveBtn.textContent = 'Preparing…';
+    try{
+      const cut = buildFinalCutout();
+      if(!cut){ toast('Nothing to save yet.', true); return; }
+      const fmt = formatSelect.value;
+      const blob = await canvasToBlob(cut, fmt, bgColor.value);
+      if(!blob){ toast('Nothing to save yet.', true); return; }
+      await saveBlobAs(blob, fmt, filenameInput.value.trim() || (baseFileName+'-cutout'), saveNote);
+    }catch(err){
+      console.error(err);
+      toast('Save failed: ' + (err && err.message ? err.message : err), true);
+    }finally{
+      saveBtn.disabled = false;
+      saveBtn.textContent = originalLabel;
+    }
+  });
+
+  // ---------- Copy to clipboard (paste into another photo/document) ----------
+  copyBtn.addEventListener('click', async ()=>{
+    copyBtn.disabled = true;
+    const originalLabel = copyBtn.textContent;
+    copyBtn.textContent = 'Copying…';
+    try{
+      const cut = buildFinalCutout();
+      if(!cut){ toast('Nothing to copy yet.', true); return; }
+      // Always PNG for clipboard: the one format every target app reliably
+      // accepts with the alpha channel intact, regardless of the Save As format picked above.
+      await copyCanvasToClipboard(cut, copyNote);
+    }finally{
+      copyBtn.disabled = false;
+      copyBtn.textContent = originalLabel;
+    }
+  });
+
+  // ---------- Save/Copy whole photo (reflects Invisible-mode edits, no mask/trim) ----------
+  saveWholeBtn.addEventListener('click', async ()=>{
+    saveWholeBtn.disabled = true;
+    const label = saveWholeBtn.textContent;
+    saveWholeBtn.textContent = 'Preparing…';
+    try{
+      const blob = await canvasToBlob(originalCanvas, 'png');
+      await saveBlobAs(blob, 'png', baseFileName + '-edited', invisibleNote);
+    }catch(err){
+      console.error(err);
+      toast('Save failed: ' + (err && err.message ? err.message : err), true);
+    }finally{
+      saveWholeBtn.disabled = false;
+      saveWholeBtn.textContent = label;
+    }
+  });
+  copyWholeBtn.addEventListener('click', async ()=>{
+    copyWholeBtn.disabled = true;
+    const label = copyWholeBtn.textContent;
+    copyWholeBtn.textContent = 'Copying…';
+    try{
+      await copyCanvasToClipboard(originalCanvas, invisibleNote);
+    }finally{
+      copyWholeBtn.disabled = false;
+      copyWholeBtn.textContent = label;
+    }
+  });
+
+  // ---------- Save-location capability note ----------
+  function saveCapabilityNote(){
+    if(window.showSaveFilePicker) return 'You\'ll be asked exactly where to save.';
+    if(navigator.share) return 'Uses your device\'s share sheet to choose where to save.';
+    return 'Saves to your browser\'s default Downloads folder.';
+  }
+  saveNote.textContent = saveCapabilityNote();
+
+  // ---------- Place onto another photo ----------
+  const placeBtn = document.getElementById('placeBtn');
+  const placeFileInput = document.getElementById('placeFileInput');
+  const placeScreen = document.getElementById('placeScreen');
+  const placeStageScroll = document.getElementById('placeStageScroll');
+  const placeCanvas = document.getElementById('placeCanvas');
+  const placeCtx = placeCanvas.getContext('2d');
+  const placeScaleSlider = document.getElementById('placeScaleSlider');
+  const placeRotateSlider = document.getElementById('placeRotateSlider');
+  const placeBackBtn = document.getElementById('placeBackBtn');
+  const placeDimsBadge = document.getElementById('placeDimsBadge');
+  const placeFormatSelect = document.getElementById('placeFormatSelect');
+  const placeFilenameInput = document.getElementById('placeFilenameInput');
+  const placeSaveBtn = document.getElementById('placeSaveBtn');
+  const placeCopyBtn = document.getElementById('placeCopyBtn');
+  const placeSaveNote = document.getElementById('placeSaveNote');
+  const placeFinalPreview = document.getElementById('placeFinalPreview');
+  const placeFinalEmpty = document.getElementById('placeFinalEmpty');
+
+  let placeBgCanvas = null;   // full-res background photo -- the live "project"
+  let placeDisplayScale = 1;  // full-res px -> on-screen CSS px
+  let placeSpriteCanvas = null; // the isolated cutout (full-res, from buildFinalCutout())
+  let sprite = null; // { x, y (center, full-res bg coords), scale, rotation (deg) }
+  const placePointers = new Map(); // pointerId -> {x,y} in full-res bg coords
+  let pinchStart = null; // {dist, angle, scale, rotation}
+  let dragOffset = null; // {dx,dy} full-res coords, single-pointer move-drag
+  let handleDrag = null; // {kind:'scale'|'rotate', ...} single-pointer handle-drag
+
+  const HANDLE_SCREEN_R = 9;       // visual handle radius, CSS px
+  const HANDLE_HIT_SCREEN_R = 18;  // generous touch target, CSS px
+  const ROTATE_HANDLE_SCREEN_DIST = 40; // distance of rotate handle above top edge, CSS px
+
+  placeBtn.addEventListener('click', ()=>{
+    const cut = buildFinalCutout();
+    if(!cut){ toast('Isolate an object first.'); return; }
+    placeSpriteCanvas = cut;
+    placeFileInput.click();
+  });
+
+  placeFileInput.addEventListener('change', async (e)=>{
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    let bitmap;
+    try{ bitmap = await createImageBitmap(f); }
+    catch(err){ toast('Could not read that as an image.', true); return; }
+
+    placeBgCanvas = document.createElement('canvas');
+    placeBgCanvas.width = bitmap.width; placeBgCanvas.height = bitmap.height;
+    placeBgCanvas.getContext('2d').drawImage(bitmap,0,0);
+
+    const spriteW = placeSpriteCanvas.width;
+    const targetW = Math.min(bitmap.width, bitmap.height) * 0.4;
+    sprite = {
+      x: bitmap.width/2, y: bitmap.height/2,
+      scale: targetW / spriteW,
+      rotation: 0,
+    };
+    placeScaleSlider.value = 100;
+    placeRotateSlider.value = 0;
+    placeFinalPreview.style.display = 'none';
+    placeFinalPreview.src = '';
+    placeFinalEmpty.style.display = 'block';
+    placeSaveNote.textContent = '';
+
+    editorScreen.style.display = 'none';
+    placeScreen.style.display = 'block';
+    placeDimsBadge.textContent = bitmap.width + '×' + bitmap.height;
+    placeFilenameInput.value = baseFileName + '-placed';
+    fitPlaceCanvas();
+    renderPlace();
+    placeFileInput.value = '';
+  });
+
+  function fitPlaceCanvas(){
+    if(!placeBgCanvas) return;
+    const maxCssW = Math.min(1000, placeStageScroll.clientWidth || 900);
+    placeDisplayScale = Math.min(1, maxCssW / placeBgCanvas.width);
+    placeCanvas.width = placeBgCanvas.width;
+    placeCanvas.height = placeBgCanvas.height;
+    placeCanvas.style.width = Math.round(placeBgCanvas.width*placeDisplayScale) + 'px';
+    placeCanvas.style.height = Math.round(placeBgCanvas.height*placeDisplayScale) + 'px';
+  }
+  window.addEventListener('resize', ()=>{ if(placeScreen.style.display!=='none'){ fitPlaceCanvas(); renderPlace(); } });
+
+  // Local (unscaled sprite-pixel) corner offsets, and the transform from sprite-local
+  // space to project (full-res background) space -- shared by rendering, handle
+  // placement, and hit-testing so they can never drift out of sync with each other.
+  function spriteLocalToWorld(lx, ly){
+    const rad = sprite.rotation * Math.PI/180;
+    const sx = lx*sprite.scale, sy = ly*sprite.scale;
+    return {
+      x: sprite.x + sx*Math.cos(rad) - sy*Math.sin(rad),
+      y: sprite.y + sx*Math.sin(rad) + sy*Math.cos(rad),
+    };
+  }
+  function spriteCorners(){
+    const hw = placeSpriteCanvas.width/2, hh = placeSpriteCanvas.height/2;
+    return {
+      tl: spriteLocalToWorld(-hw,-hh), tr: spriteLocalToWorld(hw,-hh),
+      br: spriteLocalToWorld(hw,hh), bl: spriteLocalToWorld(-hw,hh),
+    };
+  }
+  function rotateHandlePos(){
+    const hh = placeSpriteCanvas.height/2;
+    const topCenter = spriteLocalToWorld(0,-hh);
+    const rad = sprite.rotation * Math.PI/180;
+    const upX = Math.sin(rad), upY = -Math.cos(rad); // world-space "up" direction after rotation
+    const dist = ROTATE_HANDLE_SCREEN_DIST / placeDisplayScale;
+    return { x: topCenter.x + upX*dist, y: topCenter.y + upY*dist, topCenter };
+  }
+
+  function renderPlace(){
+    if(!placeBgCanvas || !sprite) return;
+    placeCtx.clearRect(0,0,placeCanvas.width,placeCanvas.height);
+    placeCtx.drawImage(placeBgCanvas,0,0);
+    placeCtx.save();
+    placeCtx.translate(sprite.x, sprite.y);
+    placeCtx.rotate(sprite.rotation * Math.PI/180);
+    placeCtx.scale(sprite.scale, sprite.scale);
+    placeCtx.drawImage(placeSpriteCanvas, -placeSpriteCanvas.width/2, -placeSpriteCanvas.height/2);
+    placeCtx.restore();
+    drawHandles();
+  }
+
+  function drawHandles(){
+    const r = HANDLE_SCREEN_R / placeDisplayScale;
+    const { tl, tr, br, bl } = spriteCorners();
+    const rot = rotateHandlePos();
+
+    placeCtx.save();
+    placeCtx.strokeStyle = 'rgba(64,208,181,0.9)';
+    placeCtx.lineWidth = 2/placeDisplayScale;
+    placeCtx.setLineDash([6/placeDisplayScale, 5/placeDisplayScale]);
+    placeCtx.beginPath();
+    placeCtx.moveTo(tl.x,tl.y); placeCtx.lineTo(tr.x,tr.y); placeCtx.lineTo(br.x,br.y);
+    placeCtx.lineTo(bl.x,bl.y); placeCtx.closePath(); placeCtx.stroke();
+
+    placeCtx.setLineDash([]);
+    placeCtx.beginPath();
+    placeCtx.moveTo(rot.topCenter.x, rot.topCenter.y); placeCtx.lineTo(rot.x, rot.y);
+    placeCtx.stroke();
+
+    function dot(p, fill){
+      placeCtx.beginPath();
+      placeCtx.arc(p.x, p.y, r, 0, Math.PI*2);
+      placeCtx.fillStyle = fill;
+      placeCtx.fill();
+      placeCtx.strokeStyle = '#0a0f0d';
+      placeCtx.lineWidth = 1.5/placeDisplayScale;
+      placeCtx.stroke();
+    }
+    [tl,tr,br,bl].forEach(p=>dot(p,'#40d0b5'));
+    dot(rot, '#e0b04a');
+    placeCtx.restore();
+  }
+
+  function placeCoordsFromEvent(e){
+    const rect = placeCanvas.getBoundingClientRect();
+    return {
+      x: (e.clientX-rect.left) * (placeCanvas.width/rect.width),
+      y: (e.clientY-rect.top) * (placeCanvas.height/rect.height),
+    };
+  }
+  function isInsideSprite(px, py){
+    const dx = px - sprite.x, dy = py - sprite.y;
+    const rad = -sprite.rotation * Math.PI/180;
+    const lx = dx*Math.cos(rad) - dy*Math.sin(rad);
+    const ly = dx*Math.sin(rad) + dy*Math.cos(rad);
+    const hw = (placeSpriteCanvas.width*sprite.scale)/2, hh = (placeSpriteCanvas.height*sprite.scale)/2;
+    return Math.abs(lx)<=hw && Math.abs(ly)<=hh;
+  }
+  function hitTestHandle(px, py){
+    const hitR = HANDLE_HIT_SCREEN_R / placeDisplayScale;
+    const rot = rotateHandlePos();
+    if(Math.hypot(px-rot.x, py-rot.y) <= hitR) return { kind:'rotate' };
+    const corners = spriteCorners();
+    for(const key of ['tl','tr','br','bl']){
+      const p = corners[key];
+      if(Math.hypot(px-p.x, py-p.y) <= hitR) return { kind:'scale', corner:key };
+    }
+    return null;
+  }
+
+  placeCanvas.addEventListener('pointerdown', (e)=>{
+    if(!sprite) return;
+    try{ placeCanvas.setPointerCapture(e.pointerId); }catch(err){}
+    const p = placeCoordsFromEvent(e);
+    placePointers.set(e.pointerId, p);
+
+    if(placePointers.size === 1){
+      dragOffset = null; handleDrag = null;
+      const hit = hitTestHandle(p.x, p.y);
+      if(hit && hit.kind==='rotate'){
+        handleDrag = { kind:'rotate',
+          startAngle: Math.atan2(p.y-sprite.y, p.x-sprite.x), startRotation: sprite.rotation };
+      } else if(hit && hit.kind==='scale'){
+        handleDrag = { kind:'scale', startDist: Math.hypot(p.x-sprite.x, p.y-sprite.y), startScale: sprite.scale };
+      } else if(isInsideSprite(p.x,p.y)){
+        dragOffset = { dx: sprite.x-p.x, dy: sprite.y-p.y };
+      }
+    } else if(placePointers.size === 2){
+      dragOffset = null; handleDrag = null;
+      const pts = [...placePointers.values()];
+      pinchStart = {
+        dist: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y),
+        angle: Math.atan2(pts[0].y-pts[1].y, pts[0].x-pts[1].x),
+        scale: sprite.scale, rotation: sprite.rotation,
+      };
+    }
+  });
+  placeCanvas.addEventListener('pointermove', (e)=>{
+    if(!sprite || !placePointers.has(e.pointerId)) return;
+    const p = placeCoordsFromEvent(e);
+    placePointers.set(e.pointerId, p);
+
+    if(placePointers.size === 1 && handleDrag){
+      if(handleDrag.kind==='rotate'){
+        const angle = Math.atan2(p.y-sprite.y, p.x-sprite.x);
+        sprite.rotation = handleDrag.startRotation + (angle-handleDrag.startAngle)*180/Math.PI;
+      } else if(handleDrag.kind==='scale'){
+        const dist = Math.hypot(p.x-sprite.x, p.y-sprite.y);
+        sprite.scale = clamp(handleDrag.startScale * (dist/Math.max(1,handleDrag.startDist)), 0.02, 20);
+      }
+      syncPlaceSlidersFromSprite();
+      renderPlace();
+    } else if(placePointers.size === 1 && dragOffset){
+      sprite.x = p.x + dragOffset.dx;
+      sprite.y = p.y + dragOffset.dy;
+      renderPlace();
+    } else if(placePointers.size === 2 && pinchStart){
+      const pts = [...placePointers.values()];
+      const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+      const angle = Math.atan2(pts[0].y-pts[1].y, pts[0].x-pts[1].x);
+      sprite.scale = clamp(pinchStart.scale * (dist/pinchStart.dist), 0.02, 20);
+      sprite.rotation = pinchStart.rotation + (angle-pinchStart.angle)*180/Math.PI;
+      syncPlaceSlidersFromSprite();
+      renderPlace();
+    }
+  });
+  function placeEndPointer(e){
+    placePointers.delete(e.pointerId);
+    if(placePointers.size < 2) pinchStart = null;
+    if(placePointers.size < 1){ dragOffset = null; handleDrag = null; }
+  }
+  placeCanvas.addEventListener('pointerup', placeEndPointer);
+  placeCanvas.addEventListener('pointercancel', placeEndPointer);
+  placeCanvas.addEventListener('pointerleave', (e)=>{ if(!placePointers.has(e.pointerId)) return; placeEndPointer(e); });
+
+  const placeBaseScale = ()=> (Math.min(placeBgCanvas.width, placeBgCanvas.height)*0.4) / placeSpriteCanvas.width;
+  function syncPlaceSlidersFromSprite(){
+    placeScaleSlider.value = clamp(Math.round((sprite.scale/placeBaseScale())*100), 5, 300);
+    placeRotateSlider.value = clamp(Math.round(((sprite.rotation+180)%360+360)%360-180), -180, 180);
+  }
+  placeScaleSlider.addEventListener('input', ()=>{
+    if(!sprite) return;
+    sprite.scale = placeBaseScale() * (parseInt(placeScaleSlider.value,10)/100);
+    renderPlace();
+  });
+  placeRotateSlider.addEventListener('input', ()=>{
+    if(!sprite) return;
+    sprite.rotation = parseInt(placeRotateSlider.value,10);
+    renderPlace();
+  });
+
+  placeBackBtn.addEventListener('click', ()=>{
+    placeScreen.style.display = 'none';
+    editorScreen.style.display = 'block';
+  });
+
+  // Builds the flattened export -- this reads the live project (placeBgCanvas + sprite)
+  // but never modifies it, so "Final image" is always just a snapshot: the project
+  // underneath stays fully editable, and saving again later updates the final image
+  // without losing or resetting any in-progress layout work.
+  function buildFlattenedPlacement(){
+    const out = document.createElement('canvas');
+    out.width = placeBgCanvas.width; out.height = placeBgCanvas.height;
+    const octx = out.getContext('2d');
+    octx.drawImage(placeBgCanvas,0,0);
+    octx.save();
+    octx.translate(sprite.x, sprite.y);
+    octx.rotate(sprite.rotation * Math.PI/180);
+    octx.scale(sprite.scale, sprite.scale);
+    octx.drawImage(placeSpriteCanvas, -placeSpriteCanvas.width/2, -placeSpriteCanvas.height/2);
+    octx.restore();
+    return out;
+  }
+
+  function updateFinalPreview(flatCanvas){
+    placeFinalPreview.src = flatCanvas.toDataURL('image/jpeg', 0.85);
+    placeFinalPreview.style.display = 'block';
+    placeFinalEmpty.style.display = 'none';
+  }
+
+  placeSaveBtn.addEventListener('click', async ()=>{
+    placeSaveBtn.disabled = true;
+    const label = placeSaveBtn.textContent;
+    placeSaveBtn.textContent = 'Preparing…';
+    try{
+      const flat = buildFlattenedPlacement();
+      const fmt = placeFormatSelect.value;
+      const blob = await canvasToBlob(flat, fmt, '#ffffff');
+      if(!blob){ toast('Nothing to save yet.', true); return; }
+      await saveBlobAs(blob, fmt, placeFilenameInput.value.trim() || (baseFileName+'-placed'), placeSaveNote);
+      updateFinalPreview(flat);
+    }catch(err){
+      console.error(err);
+      toast('Save failed: ' + (err && err.message ? err.message : err), true);
+    }finally{
+      placeSaveBtn.disabled = false;
+      placeSaveBtn.textContent = label;
+    }
+  });
+  placeCopyBtn.addEventListener('click', async ()=>{
+    placeCopyBtn.disabled = true;
+    const label = placeCopyBtn.textContent;
+    placeCopyBtn.textContent = 'Copying…';
+    try{
+      const flat = buildFlattenedPlacement();
+      await copyCanvasToClipboard(flat, placeSaveNote);
+      updateFinalPreview(flat);
+    }finally{
+      placeCopyBtn.disabled = false;
+      placeCopyBtn.textContent = label;
+    }
+  });
+
+  // ---------- PWA ----------
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', ()=>{
+      navigator.serviceWorker.register('./sw.js').catch(()=>{});
+    });
+  }
+
+})();
+</script>
+</body>
+</html>
