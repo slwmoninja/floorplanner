@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#14161a">
 <link rel="manifest" href="./manifest.json">
 <link rel="icon" href="./icon-192.png">
-<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png?v=51b127dc">
 <style>
   :root{
     --bg:#14161a; --panel:#1c1f25; --panel2:#20242b; --border:#2c313a;
@@ -162,14 +162,82 @@
   @keyframes spin{ to{ transform:rotate(360deg); } }
 
   footer{ text-align:center; color:var(--dim); font-size:.72rem; padding:1rem; }
+
+  /* ---------- Install pill: pill-shaped, top-right of the topbar. The
+     header is shared chrome across every screen (Upload/Editor/Place), so
+     one instance here covers "every main screen" at once; the About popup
+     (this app's Settings-equivalent surface) keeps showing it as an inert
+     status line after install instead of hiding it entirely. ---------- */
+  .topbar-install-btn{
+    background:rgba(64,208,181,.14); border:1px solid var(--accent); color:var(--accent);
+    border-radius:999px; padding:.4rem .85rem; font-weight:700; font-size:.78rem;
+    cursor:pointer; white-space:nowrap;
+  }
+  .topbar-install-btn.installed{
+    background:var(--panel2); border-color:var(--border); color:var(--dim); cursor:default;
+  }
+  #infoBtn{ border-radius:999px; padding:.45rem .6rem; line-height:1; }
+
+  /* ---------- Centered popup modal (install/uninstall steps, About, the
+     proactive install-prompt) -- not a position-anchored tooltip, since a
+     tooltip pinned to the top-right pill's tap point would run off-screen. */
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:80;
+    display:flex; align-items:center; justify-content:center; padding:1rem;
+  }
+  .modal{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:1.15rem 1.25rem; max-width:420px; width:100%; max-height:82vh; overflow:auto;
+    position:relative; box-shadow:0 16px 40px rgba(0,0,0,.5);
+  }
+  .modal h3{ margin:0 0 .7rem; font-size:1.02rem; }
+  .modal .modal-close{
+    position:absolute; top:.6rem; right:.65rem; background:none; border:none;
+    color:var(--dim); font-size:1.05rem; cursor:pointer; padding:.2rem .4rem;
+  }
+  .modal .modal-close:hover{ color:var(--text); }
+  .modal-body{ color:var(--text); font-size:.86rem; line-height:1.5; }
+  .modal-body ol{ margin:.3rem 0 0; padding-left:1.1rem; }
+  .about-row{ display:flex; justify-content:space-between; padding:.35rem 0; border-bottom:1px solid var(--border); font-size:.84rem; }
+  .about-row:last-child{ border-bottom:none; }
+  .about-row .k{ color:var(--dim); }
+  .btn-primary{
+    background:var(--accent); color:#0a1512; border:none; border-radius:9px;
+    padding:.7rem 1rem; font-weight:700; font-size:.88rem; cursor:pointer; width:100%;
+  }
+  .btn-secondary{
+    background:transparent; color:var(--text); border:1px solid var(--border); border-radius:9px;
+    padding:.7rem 1rem; font-weight:600; font-size:.88rem; cursor:pointer; width:100%; margin-top:.5rem;
+  }
+
+  /* ---------- Pull-to-refresh indicator: fixed, top-center, off-screen
+     above the viewport until dragged into view. ---------- */
+  .pull-refresh{
+    position:fixed; top:0; left:50%; transform:translate(-50%,-60px);
+    width:38px; height:38px; border-radius:50%; background:var(--panel);
+    border:1px solid var(--border); display:flex; align-items:center; justify-content:center;
+    z-index:70; box-shadow:0 6px 16px rgba(0,0,0,.35);
+  }
+  .pull-refresh.hidden{ display:none; }
+  .pull-refresh .arrow{ color:var(--accent); font-size:1.05rem; transition:transform .15s; }
+  .pull-refresh.ready .arrow{ transform:rotate(180deg); }
+  .pull-refresh.spinning .arrow{ display:none; }
+  .pull-refresh.spinning::after{
+    content:''; width:16px; height:16px; border-radius:50%; border:2px solid var(--border);
+    border-top-color:var(--accent); animation:spin .7s linear infinite;
+  }
 </style>
 </head>
 <body>
+
+<div class="pull-refresh hidden" id="pullRefresh"><span class="arrow">&#8595;</span></div>
 
 <header>
   <h1>PhotoDesigner</h1>
   <span class="sub">isolate, erase, and compose photos</span>
   <div class="spacer"></div>
+  <button class="topbar-install-btn" id="installBtn" style="display:none;" title="Install PhotoDesigner on this device">Install</button>
+  <button class="btn" id="infoBtn" title="About PhotoDesigner">&#9432;</button>
   <button class="btn" id="startOverBtn" style="display:none;" title="Discard this photo and start over with a new one">Start over</button>
 </header>
 
@@ -386,6 +454,34 @@
   const saveNote = document.getElementById('saveNote');
   const copyBtn = document.getElementById('copyBtn');
   const copyNote = document.getElementById('copyNote');
+  const installBtn = document.getElementById('installBtn');
+  const infoBtn = document.getElementById('infoBtn');
+
+  // ---------- Screen navigation: back gesture goes exactly one screen back ----------
+  // Every explicit forward navigation (loading a photo, opening Place, tapping
+  // "Back to editing", tapping "Start over") goes through navigateTo(), which
+  // both switches the visible screen AND pushes exactly one history entry. A
+  // single popstate listener below just reflects whatever the browser already
+  // walked back to -- it must NOT push anything itself. That's what makes a
+  // hardware back press / Android gesture-nav swipe / the browser's own back
+  // button undo exactly one step (e.g. Place -> Editor) instead of jumping
+  // straight to the Upload screen no matter how deep the user is.
+  let currentScreenName = 'upload';
+  function showScreen(name){
+    uploadScreen.style.display = name==='upload' ? 'flex' : 'none';
+    editorScreen.style.display = name==='editor' ? 'block' : 'none';
+    document.getElementById('placeScreen').style.display = name==='place' ? 'block' : 'none';
+    startOverBtn.style.display = name==='upload' ? 'none' : 'inline-block';
+    currentScreenName = name;
+  }
+  function navigateTo(name){
+    showScreen(name);
+    try{ history.pushState({ screen:name }, ''); }catch(e){}
+  }
+  window.addEventListener('popstate', (e)=>{
+    const target = (e.state && e.state.screen) || 'upload';
+    showScreen(target);
+  });
 
   // ---------- State ----------
   const WORK_MAX = 1400; // longest side, px, for mask computation
@@ -508,9 +604,7 @@
     mask = new Uint8ClampedArray(workW*workH); // all 0
 
     resetEditorState();
-    uploadScreen.style.display = 'none';
-    editorScreen.style.display = 'block';
-    startOverBtn.style.display = 'inline-block';
+    navigateTo('editor');
 
     zoomSlider.value = 100;
     fitStageCanvas();
@@ -566,10 +660,7 @@
   urlInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') loadFromUrl(urlInput.value.trim()); });
 
   startOverBtn.addEventListener('click', ()=>{
-    editorScreen.style.display = 'none';
-    document.getElementById('placeScreen').style.display = 'none';
-    uploadScreen.style.display = 'flex';
-    startOverBtn.style.display = 'none';
+    navigateTo('upload');
     fileInput.value = ''; urlInput.value = '';
   });
 
@@ -1372,8 +1463,7 @@
     placeFinalEmpty.style.display = 'block';
     placeSaveNote.textContent = '';
 
-    editorScreen.style.display = 'none';
-    placeScreen.style.display = 'block';
+    navigateTo('place');
     placeDimsBadge.textContent = bitmap.width + '×' + bitmap.height;
     placeFilenameInput.value = baseFileName + '-placed';
     fitPlaceCanvas();
@@ -1573,8 +1663,7 @@
   });
 
   placeBackBtn.addEventListener('click', ()=>{
-    placeScreen.style.display = 'none';
-    editorScreen.style.display = 'block';
+    navigateTo('editor');
   });
 
   // Builds the flattened export -- this reads the live project (placeBgCanvas + sprite)
@@ -1634,7 +1723,334 @@
     }
   });
 
-  // ---------- PWA ----------
+  // ---------- PWA: version marker ----------
+  // Kept in sync automatically by scripts/sync_pwa_version.py on every
+  // commit (derived from a content hash of index.html/manifest.json/icons) --
+  // never hand-bumped, so it always reflects what's actually deployed and can
+  // be used to confirm a reload picked up the latest push.
+  const APP_VERSION = '1.0+0c2aabab';
+
+  // ---------- PWA: generic centered popup ----------
+  // Reused for install/uninstall steps, the About panel (this single-screen
+  // tool's stand-in for a Settings screen), and the proactive install
+  // prompt -- a centered modal rather than a position-anchored tooltip, since
+  // a tooltip pinned to the top-right pill's tap point would run off-screen.
+  function openModal(title, bodyHtml){
+    const wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div class="modal-backdrop">' +
+        '<div class="modal">' +
+          '<button class="modal-close" aria-label="Close">&#10005;</button>' +
+          '<h3>'+title+'</h3>' +
+          '<div class="modal-body">'+bodyHtml+'</div>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+    function close(){ wrap.remove(); }
+    wrap.querySelector('.modal-close').addEventListener('click', close);
+    wrap.querySelector('.modal-backdrop').addEventListener('click', (e)=>{ if(e.target===e.currentTarget) close(); });
+    return wrap;
+  }
+
+  // ---------- PWA: install pill ----------
+  // True once actually running as the installed/home-screen app rather than
+  // a regular browser tab -- display-mode covers Chrome/Edge/Android,
+  // navigator.standalone is Safari's own (non-standard, iOS-only) equivalent.
+  function isStandaloneApp(){
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  }
+  const INSTALL_FLAG_KEY = 'photodesignerInstallPromptAccepted';
+  const INSTALL_ASKED_KEY = 'photodesignerInstallPromptAsked';
+  function getInstallFlag(){ try{ return localStorage.getItem(INSTALL_FLAG_KEY)==='1'; }catch(e){ return false; } }
+  function setInstallFlag(v){ try{ if(v) localStorage.setItem(INSTALL_FLAG_KEY,'1'); else localStorage.removeItem(INSTALL_FLAG_KEY); }catch(e){} }
+  // Not just isStandaloneApp() alone -- a regular tab that just walked
+  // through a manual/native install doesn't itself flip to
+  // display-mode:standalone until the user actually relaunches from the real
+  // Home Screen icon.
+  function isInstalled(){
+    return isStandaloneApp() || getInstallFlag();
+  }
+
+  const INSTALL_STEPS_HTML =
+    '<strong>iPhone/iPad (Safari):</strong>' +
+    '<ol><li>Tap the Share icon in the toolbar.</li>' +
+      '<li>Scroll down and tap "Add to Home Screen".</li>' +
+      '<li>Tap "Add".</li></ol><br>' +
+    '<strong>Android (Chrome):</strong>' +
+    '<ol><li>Tap the &#8942; menu.</li>' +
+      '<li>Tap "Add to Home screen" or "Install app".</li>' +
+      '<li>Tap "Install" (or "Add") to confirm.</li></ol><br>' +
+    '<strong>Desktop Chrome/Edge:</strong>' +
+    '<ol><li>Click the install icon in the address bar (or &#8942; menu &rarr; "Install PhotoDesigner").</li>' +
+      '<li>Click "Install".</li></ol>';
+  const UNINSTALL_STEPS_HTML =
+    '<strong>iPhone/iPad:</strong>' +
+    '<ol><li>Touch and hold the icon.</li>' +
+      '<li>Tap "Remove App".</li>' +
+      '<li>Tap "Delete App" to confirm.</li></ol><br>' +
+    '<strong>Android:</strong>' +
+    '<ol><li>Touch and hold the icon.</li>' +
+      '<li>Tap "Uninstall".</li>' +
+      '<li>Confirm.</li></ol><br>' +
+    '<strong>Desktop Chrome/Edge:</strong>' +
+    '<ol><li>Right-click the icon.</li>' +
+      '<li>Click "Uninstall".</li>' +
+      '<li>Confirm.</li></ol>';
+
+  // Chrome/Edge/Android fire this instead of installing immediately, handing
+  // over an event whose .prompt() shows the native install UI on demand --
+  // captured up front and held until the pill is actually tapped.
+  let deferredInstallPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e)=>{
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    // Chrome only fires this when it believes PhotoDesigner is NOT currently
+    // installed for this origin -- the one reliable signal that a stuck-true
+    // flag is stale (site storage survives an OS-level Home Screen uninstall,
+    // which is what leaves the flag stuck true in the first place).
+    if(getInstallFlag()){ setInstallFlag(false); }
+    syncInstallUI();
+  });
+  window.addEventListener('appinstalled', ()=>{
+    deferredInstallPrompt = null;
+    setInstallFlag(true);
+    syncInstallUI();
+  });
+
+  // Shared by the pill's tap and the proactive install-prompt popup's
+  // "Install" button -- one native-vs-manual branch, not two.
+  function triggerInstall(){
+    if(deferredInstallPrompt){
+      const promptEvent = deferredInstallPrompt;
+      deferredInstallPrompt = null; // one-shot -- the browser invalidates it after a single use either way
+      promptEvent.prompt();
+      promptEvent.userChoice.then((choice)=>{
+        if(choice.outcome==='accepted'){ setInstallFlag(true); }
+        syncInstallUI();
+      });
+    }else{
+      openModal('Install on Home Screen', INSTALL_STEPS_HTML);
+    }
+  }
+
+  function onInstallPillClick(){
+    if(isInstalled()){ openModal('Uninstall', UNINSTALL_STEPS_HTML); }
+    else{ triggerInstall(); }
+  }
+  installBtn.addEventListener('click', onInstallPillClick);
+
+  // Shown top-right of the header, which is shared chrome across every
+  // screen -- disappears entirely once installed (nothing left to act on),
+  // except inside the About popup below, which keeps it visible as an inert
+  // "Installed" status line since that's the one place to go confirm state.
+  function syncInstallUI(){
+    const installed = isInstalled();
+    installBtn.style.display = installed ? 'none' : 'inline-block';
+  }
+
+  function aboutInstallRowHtml(){
+    const installed = isInstalled();
+    if(installed){
+      return '<button class="topbar-install-btn installed" id="aboutInstallBtn" style="width:100%;margin-top:.6rem;">Installed</button>';
+    }
+    return '<button class="topbar-install-btn" id="aboutInstallBtn" style="width:100%;margin-top:.6rem;">Install</button>';
+  }
+  infoBtn.addEventListener('click', ()=>{
+    const showResetLink = !isStandaloneApp() && getInstallFlag();
+    const wrap = openModal('About PhotoDesigner',
+      '<div style="margin-bottom:.6rem;">Isolate objects from photos, erase things with on-device inpainting, and compose cutouts onto other photos. Everything runs on this device — your photo is never uploaded anywhere.</div>' +
+      '<div class="about-row"><span class="k">Version</span><span>'+APP_VERSION+'</span></div>' +
+      aboutInstallRowHtml() +
+      (showResetLink ?
+        '<div style="margin-top:.6rem;"><a href="#" id="resetInstallLink" style="color:var(--dim); font-size:.78rem;">Not on your Home Screen? Reset install status</a></div>'
+        : '')
+    );
+    wrap.querySelector('#aboutInstallBtn').addEventListener('click', ()=>{ wrap.remove(); onInstallPillClick(); });
+    const resetLink = wrap.querySelector('#resetInstallLink');
+    if(resetLink){
+      resetLink.addEventListener('click', (e)=>{
+        e.preventDefault();
+        setInstallFlag(false);
+        syncInstallUI();
+        wrap.remove();
+        toast('Install status reset.');
+      });
+    }
+  });
+
+  // Proactive "Install PhotoDesigner?" prompt, shown once ever per device,
+  // ~1.5s after load so beforeinstallprompt (which can arrive a moment after
+  // load) has a real chance to populate deferredInstallPrompt first, giving
+  // "Install" here the same shot at the fast native one-tap path as the pill.
+  function maybeShowInstallPrompt(){
+    if(isInstalled()) return;
+    let asked = false;
+    try{ asked = localStorage.getItem(INSTALL_ASKED_KEY)==='1'; }catch(e){}
+    if(asked) return;
+    setTimeout(()=>{
+      if(isInstalled()) return; // could have installed (or been asked elsewhere) during the delay
+      try{ localStorage.setItem(INSTALL_ASKED_KEY,'1'); }catch(e){}
+      const wrap = openModal('Install PhotoDesigner?',
+        '<div style="margin-bottom:.9rem;">Installing adds PhotoDesigner to your Home Screen and gives it the strongest protection against your browser silently clearing its data.</div>' +
+        '<button class="btn-primary" id="installPromptYes">Install</button>' +
+        '<button class="btn-secondary" id="installPromptNo">Not now</button>'
+      );
+      wrap.querySelector('#installPromptYes').addEventListener('click', ()=>{ wrap.remove(); triggerInstall(); });
+      wrap.querySelector('#installPromptNo').addEventListener('click', ()=>{
+        wrap.remove();
+        toast('No problem — look for the Install button in the top right whenever you\'re ready.');
+      });
+    }, 1500);
+  }
+
+  // Best-effort ask not to auto-evict this origin's storage under low-disk
+  // pressure. PhotoDesigner keeps no persisted photo/edit data (photos stay
+  // in-tab and are exported explicitly via Save As/Copy), so this only
+  // protects the handful of install/update bookkeeping keys in
+  // localStorage -- low-stakes, but the call is free, so it's still made.
+  function checkStoragePersistence(){
+    if(!(navigator.storage && navigator.storage.persist)) return;
+    (navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(false)).then((persisted)=>{
+      if(persisted) return;
+      navigator.storage.persist().then((granted)=>{
+        if(!granted && navigator.storage.estimate){
+          navigator.storage.estimate().then((est)=>{
+            console.warn('[PhotoDesigner] storage persistence not granted; usage/quota estimate:', est);
+          }).catch(()=>{});
+        }
+      }).catch(()=>{});
+    }).catch(()=>{});
+  }
+
+  // ---------- PWA: update checking ----------
+  // Two independent signals, run together -- see checkForUpdate(). Never
+  // reloads while a field is focused; defers and retries on the next check
+  // instead of yanking a URL/filename someone is mid-typing out from under
+  // them.
+  function isUserTyping(){
+    const el = document.activeElement;
+    if(!el) return false;
+    if(el.tagName==='TEXTAREA') return true;
+    if(el.tagName==='INPUT') return /^(text|search|number|url)$/i.test(el.type||'text');
+    return false;
+  }
+  // Signal 1: index.html's own etag/last-modified, remembered across
+  // sessions so the very first check of a new session can catch "what got
+  // served just now is already behind what's on the server."
+  const DEPLOYED_TAG_KEY = 'photodesignerDeployedTag';
+  let deployedVersionTag = (()=>{ try{ return localStorage.getItem(DEPLOYED_TAG_KEY); }catch(e){ return null; } })();
+  // Signal 2: forces the service worker's own byte-diff check right now
+  // instead of waiting on the browser's lazy schedule (up to ~24h). Once a
+  // genuinely new worker activates (it calls skipWaiting()/clients.claim()
+  // itself -- see sw.js), 'controllerchange' fires and that's what actually
+  // triggers the reload, not reg.update() itself (which only starts the check).
+  let swReloadPending = false, swReloadTriggered = false;
+  // Deletes index.html from every Cache Storage bucket this origin owns (not
+  // just sw.js's current CACHE_NAME) so the reload below actually gets fresh
+  // content instead of sw.js's stale-while-revalidate handler re-serving the
+  // same cached shell it was trying to escape.
+  function purgeCachedShell(){
+    if(!('caches' in window)) return Promise.resolve();
+    return caches.keys().then((names)=>Promise.all(names.map((n)=>caches.open(n).then((c)=>c.delete('./index.html'))))).catch(()=>{});
+  }
+  function reloadForNewServiceWorker(){
+    if(swReloadTriggered) return; // controllerchange can fire more than once per page life
+    if(isUserTyping()){ swReloadPending = true; return; } // retried from checkForUpdate's next call
+    swReloadTriggered = true;
+    purgeCachedShell().then(()=>{ location.reload(); });
+  }
+  if(navigator.serviceWorker){
+    navigator.serviceWorker.addEventListener('controllerchange', reloadForNewServiceWorker);
+  }
+  // Returns a status string so callers wanting feedback (pull-to-refresh)
+  // can react -- the load/visibilitychange callers just ignore it.
+  function checkForUpdate(){
+    if(swReloadPending && !isUserTyping()){ reloadForNewServiceWorker(); return Promise.resolve('reloading'); }
+    const swCheck = (navigator.serviceWorker && navigator.serviceWorker.getRegistration)
+      ? navigator.serviceWorker.getRegistration().then((reg)=>{ if(reg) reg.update().catch(()=>{}); }).catch(()=>{})
+      : Promise.resolve();
+    return swCheck.then(()=>{
+      return fetch(location.pathname+'?_='+Date.now(), { cache:'no-store', method:'HEAD' }).then((res)=>{
+        const tag = res.headers.get('etag') || res.headers.get('last-modified');
+        if(!tag) return 'unknown';
+        if(deployedVersionTag===null){
+          deployedVersionTag = tag;
+          try{ localStorage.setItem(DEPLOYED_TAG_KEY, tag); }catch(e){}
+          return 'up-to-date';
+        }
+        if(tag===deployedVersionTag) return 'up-to-date';
+        if(isUserTyping()) return 'deferred';
+        deployedVersionTag = tag;
+        try{ localStorage.setItem(DEPLOYED_TAG_KEY, tag); }catch(e){}
+        return purgeCachedShell().then(()=>{ location.reload(); return 'reloading'; });
+      }).catch(()=>'offline'); // offline or blocked -- silently skip, next successful check catches up
+    });
+  }
+
+  // ---------- PWA: pull-to-refresh ----------
+  // Forces an update check on demand instead of waiting for backgrounding/
+  // foregrounding. Only activates when the touch starts at the very top of
+  // the page's own scroll AND not inside the stage canvas panning/drawing
+  // surfaces (#stageScroll / #placeStageScroll each have their own touch
+  // handling for select/brush/erase/drag gestures — pull-to-refresh would
+  // otherwise fight those) and no modal is open.
+  (function initPullToRefresh(){
+    const indicator = document.getElementById('pullRefresh');
+    if(!indicator) return;
+    const THRESHOLD = 70;
+    let startY = null, dragging = false, ready = false;
+    document.addEventListener('touchstart', (e)=>{
+      const insideStage = e.target.closest && e.target.closest('#stageScroll, #placeStageScroll');
+      if(window.scrollY===0 && !insideStage && !document.querySelector('.modal-backdrop')){
+        startY = e.touches[0].clientY;
+        dragging = true; ready = false;
+        indicator.classList.remove('hidden');
+      }
+    }, { passive:true });
+    document.addEventListener('touchmove', (e)=>{
+      if(!dragging || startY===null) return;
+      const dy = e.touches[0].clientY - startY;
+      if(dy>0 && window.scrollY===0){
+        const dist = Math.min(dy, THRESHOLD*1.6);
+        ready = dy > THRESHOLD;
+        indicator.style.transform = 'translate(-50%, '+(dist-60)+'px)';
+        indicator.classList.toggle('ready', ready);
+      }
+    }, { passive:true });
+    document.addEventListener('touchend', ()=>{
+      if(!dragging) return;
+      dragging = false;
+      if(!ready){
+        indicator.classList.remove('ready');
+        indicator.style.transform = '';
+        indicator.classList.add('hidden');
+        startY = null;
+        return;
+      }
+      indicator.classList.remove('ready');
+      indicator.classList.add('spinning');
+      indicator.style.transform = 'translate(-50%, 10px)';
+      checkForUpdate().then((status)=>{
+        if(status !== 'reloading'){ // otherwise the page is already navigating away
+          indicator.classList.remove('spinning');
+          indicator.style.transform = '';
+          indicator.classList.add('hidden');
+        }
+        startY = null;
+      });
+    }, { passive:true });
+  })();
+
+  // ---------- PWA: bootstrap ----------
+  syncInstallUI();
+  try{ history.replaceState({ screen:'upload' }, ''); }catch(e){} // the first screen shown on load establishes the baseline
+  maybeShowInstallPrompt();
+  checkForUpdate();
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState==='visible') checkForUpdate();
+  });
+  checkStoragePersistence();
+
   if('serviceWorker' in navigator){
     window.addEventListener('load', ()=>{
       navigator.serviceWorker.register('./sw.js').catch(()=>{});
