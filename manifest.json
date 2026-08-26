@@ -1,7 +1,7 @@
 {
   "name": "PhotoDesigner",
   "short_name": "PhotoDesigner",
-  "description": "Isolate objects from photos, erase things with on-device inpainting, and compose cutouts onto other photos.",
+  "description": "Cut, hide and paste objects in photos.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
