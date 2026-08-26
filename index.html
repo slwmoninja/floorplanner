@@ -62,6 +62,16 @@
   }
   #fileInput{ display:none; }
 
+  .resumeCard{
+    display:flex; align-items:center; gap:.7rem; background:var(--panel);
+    border:1px solid var(--border); border-radius:12px; padding:.6rem .7rem;
+  }
+  .resumeCard img{ width:52px; height:52px; object-fit:cover; border-radius:8px; flex:none; background:#191b1f; }
+  .resumeCard .meta{ flex:1; min-width:0; }
+  .resumeCard .meta .title{ font-weight:600; font-size:.86rem; }
+  .resumeCard .meta .sub{ color:var(--dim); font-size:.74rem; }
+  .resumeCard .actions{ display:flex; gap:.4rem; flex:none; }
+
   /* ---------- Editor ---------- */
   #editorScreen{ display:none; }
   .toolbar{
@@ -163,6 +173,16 @@
 
   footer{ text-align:center; color:var(--dim); font-size:.72rem; padding:1rem; }
 
+  /* ---------- Bottom menu: quick access to the project persistence feature
+     from any screen, not just the resume cards on the upload screen. */
+  #bottomBar{
+    position:fixed; left:0; right:0; bottom:0; z-index:30;
+    display:flex; gap:.5rem; justify-content:center;
+    background:var(--panel); border-top:1px solid var(--border);
+    padding:.55rem 1rem calc(.55rem + env(safe-area-inset-bottom, 0px));
+  }
+  #bottomBar .btn{ flex:1; max-width:220px; text-align:center; }
+
   /* ---------- Install pill: pill-shaped, top-right of the topbar. The
      header is shared chrome across every screen (Upload/Editor/Place), so
      one instance here covers "every main screen" at once; the About popup
@@ -245,6 +265,8 @@
 
   <!-- ============ UPLOAD SCREEN ============ -->
   <section id="uploadScreen">
+    <div id="resumeCards" style="display:none; width:100%; max-width:640px; flex-direction:column; gap:.6rem;"></div>
+
     <div class="dropzone" id="dropzone">
       <div class="big">Drop a photo here, or tap to choose one</div>
       <div class="small">Any format your device can open — JPG, PNG, WEBP, HEIC, GIF, BMP, AVIF. You can also paste an image with Ctrl/Cmd+V.</div>
@@ -408,6 +430,11 @@
 
 <footer>Runs entirely on this device — your photo is never uploaded anywhere.</footer>
 
+<nav id="bottomBar">
+  <button class="btn" id="bottomSaveBtn" title="Save your current progress right now, instead of waiting for autosave">Save…</button>
+  <button class="btn" id="bottomRestoreBtn" title="Pick up a saved photo or composite project">Restore</button>
+</nav>
+
 <script>
 (function(){
   'use strict';
@@ -473,6 +500,7 @@
     document.getElementById('placeScreen').style.display = name==='place' ? 'block' : 'none';
     startOverBtn.style.display = name==='upload' ? 'none' : 'inline-block';
     currentScreenName = name;
+    if(name==='upload' && typeof initResumeCards==='function') initResumeCards();
   }
   function navigateTo(name){
     showScreen(name);
@@ -550,6 +578,247 @@
     // A long-press that revealed a hint shouldn't also fire the element's click / open a text-selection menu.
     document.addEventListener('contextmenu', (e)=>{ if(bubble) e.preventDefault(); });
   })();
+
+  // ---------- Project persistence (IndexedDB): exactly two in-progress slots ----------
+  // 'editor' = whatever's currently in the isolate/erase screen (including any
+  // Invisible-mode edits baked into the photo, plus the current selection).
+  // 'place'  = whatever's currently in the compose screen (background + cutout
+  // sprite + its transform). Independent of each other and of the explicit
+  // Save/Copy exports -- this is just "don't lose unfinished work if the tab
+  // closes," not the user's real backup.
+  const PROJECT_DB_NAME = 'photodesigner-projects', PROJECT_DB_VERSION = 1, PROJECT_STORE = 'projects';
+  function openProjectDB(){
+    return new Promise((resolve,reject)=>{
+      const req = indexedDB.open(PROJECT_DB_NAME, PROJECT_DB_VERSION);
+      req.onupgradeneeded = ()=>{ req.result.createObjectStore(PROJECT_STORE); };
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+  async function projectDbPut(key, value){
+    try{
+      const db = await openProjectDB();
+      await new Promise((res,rej)=>{
+        const tx = db.transaction(PROJECT_STORE,'readwrite');
+        tx.objectStore(PROJECT_STORE).put(value, key);
+        tx.oncomplete = res; tx.onerror = ()=>rej(tx.error);
+      });
+      db.close();
+    }catch(e){ console.warn('project autosave failed', e); }
+  }
+  async function projectDbGet(key){
+    try{
+      const db = await openProjectDB();
+      const val = await new Promise((res,rej)=>{
+        const tx = db.transaction(PROJECT_STORE,'readonly');
+        const r = tx.objectStore(PROJECT_STORE).get(key);
+        r.onsuccess = ()=>res(r.result);
+        r.onerror = ()=>rej(r.error);
+      });
+      db.close();
+      return val || null;
+    }catch(e){ console.warn('project load failed', e); return null; }
+  }
+  async function projectDbDelete(key){
+    try{
+      const db = await openProjectDB();
+      await new Promise((res,rej)=>{
+        const tx = db.transaction(PROJECT_STORE,'readwrite');
+        tx.objectStore(PROJECT_STORE).delete(key);
+        tx.oncomplete = res; tx.onerror = ()=>rej(tx.error);
+      });
+      db.close();
+    }catch(e){}
+  }
+  function canvasToPngBlob(canvas){
+    return new Promise(res => canvas.toBlob(res, 'image/png'));
+  }
+
+  async function saveEditorProjectNow(){
+    if(!mask) return false;
+    const blob = await canvasToPngBlob(originalCanvas);
+    if(!blob) return false;
+    await projectDbPut('editor', {
+      imageBlob: blob, workW, workH,
+      maskBuffer: mask.buffer.slice(0),
+      points: points.slice(),
+      baseFileName, savedAt: Date.now(),
+    });
+    return true;
+  }
+  let editorSaveDebounce = null;
+  function scheduleEditorProjectSave(){
+    if(!mask) return;
+    clearTimeout(editorSaveDebounce);
+    editorSaveDebounce = setTimeout(saveEditorProjectNow, 500);
+  }
+
+  async function savePlaceProjectNow(){
+    if(!placeBgCanvas || !sprite) return false;
+    const [bgBlob, spriteBlob] = await Promise.all([
+      canvasToPngBlob(placeBgCanvas), canvasToPngBlob(placeSpriteCanvas)
+    ]);
+    if(!bgBlob || !spriteBlob) return false;
+    await projectDbPut('place', {
+      bgBlob, spriteBlob, sprite: { x:sprite.x, y:sprite.y, scale:sprite.scale, rotation:sprite.rotation },
+      filename: placeFilenameInput.value || (baseFileName+'-placed'),
+      savedAt: Date.now(),
+    });
+    return true;
+  }
+  let placeSaveDebounce = null;
+  function schedulePlaceProjectSave(){
+    if(!placeBgCanvas || !sprite) return;
+    clearTimeout(placeSaveDebounce);
+    placeSaveDebounce = setTimeout(savePlaceProjectNow, 500);
+  }
+
+  // A user switching to another app (or the browser reclaiming a backgrounded
+  // tab's memory) shouldn't cost them the last few seconds of edits sitting in
+  // the debounce window. visibilitychange fires reliably before that happens
+  // on both mobile and desktop -- pagehide is a backstop for actual navigation/
+  // close. Both projects are flushed regardless of which screen is active,
+  // since each save function already no-ops safely if its project doesn't exist.
+  function flushPendingProjectSaves(){
+    clearTimeout(editorSaveDebounce);
+    clearTimeout(placeSaveDebounce);
+    saveEditorProjectNow();
+    savePlaceProjectNow();
+  }
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState==='hidden') flushPendingProjectSaves();
+  });
+  window.addEventListener('pagehide', flushPendingProjectSaves);
+
+  function relativeTime(ts){
+    const s = Math.floor((Date.now()-ts)/1000);
+    if(s<60) return 'just now';
+    if(s<3600) return Math.floor(s/60)+'m ago';
+    if(s<86400) return Math.floor(s/3600)+'h ago';
+    return Math.floor(s/86400)+'d ago';
+  }
+
+  async function resumeEditorProject(proj){
+    const bitmap = await createImageBitmap(proj.imageBlob);
+    baseFileName = proj.baseFileName || 'photo';
+    originalCanvas.width = bitmap.width; originalCanvas.height = bitmap.height;
+    originalCtx.clearRect(0,0,bitmap.width,bitmap.height);
+    originalCtx.drawImage(bitmap,0,0);
+
+    workW = proj.workW; workH = proj.workH;
+    scaleWorkToOrig = bitmap.width/workW;
+    workCanvas.width = workW; workCanvas.height = workH;
+    workCtx.drawImage(originalCanvas, 0, 0, workW, workH);
+    workImageData = workCtx.getImageData(0,0,workW,workH);
+    workRGB = workImageData.data;
+    edgeMag = computeEdgeMagnitude(workRGB, workW, workH);
+    mask = new Uint8ClampedArray(proj.maskBuffer.slice(0));
+
+    resetEditorState();
+    points = (proj.points||[]).slice();
+    pointCountBadge.textContent = points.length + ' point' + (points.length===1?'':'s');
+    navigateTo('editor');
+
+    zoomSlider.value = 100;
+    fitStageCanvas();
+    renderStage();
+    renderReview();
+    stageDims.textContent = bitmap.width + '×' + bitmap.height;
+    stageStatus.textContent = baseFileName;
+    filenameInput.value = baseFileName + '-cutout';
+  }
+
+  async function resumePlaceProject(proj){
+    const [bgBitmap, spriteBitmap] = await Promise.all([
+      createImageBitmap(proj.bgBlob), createImageBitmap(proj.spriteBlob)
+    ]);
+    placeBgCanvas = document.createElement('canvas');
+    placeBgCanvas.width = bgBitmap.width; placeBgCanvas.height = bgBitmap.height;
+    placeBgCanvas.getContext('2d').drawImage(bgBitmap,0,0);
+
+    placeSpriteCanvas = document.createElement('canvas');
+    placeSpriteCanvas.width = spriteBitmap.width; placeSpriteCanvas.height = spriteBitmap.height;
+    placeSpriteCanvas.getContext('2d').drawImage(spriteBitmap,0,0);
+
+    sprite = { ...proj.sprite };
+    placeFinalPreview.style.display = 'none'; placeFinalPreview.src = '';
+    placeFinalEmpty.style.display = 'block'; placeSaveNote.textContent = '';
+
+    navigateTo('place');
+    placeDimsBadge.textContent = bgBitmap.width + '×' + bgBitmap.height;
+    placeFilenameInput.value = proj.filename || 'placed-photo';
+    fitPlaceCanvas();
+    syncPlaceSlidersFromSprite();
+    renderPlace();
+  }
+
+  function buildResumeCard(kind, proj){
+    const el = document.createElement('div');
+    el.className = 'resumeCard';
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(kind==='editor' ? proj.imageBlob : proj.bgBlob);
+    const meta = document.createElement('div'); meta.className = 'meta';
+    const title = document.createElement('div'); title.className = 'title';
+    title.textContent = (kind==='editor' ? 'Saved project — photo: ' : 'Saved project — composite: ') +
+      (kind==='editor' ? (proj.baseFileName||'photo') : (proj.filename||'photo'));
+    const sub = document.createElement('div'); sub.className = 'sub';
+    sub.textContent = 'Saved automatically ' + relativeTime(proj.savedAt);
+    meta.append(title, sub);
+    const actions = document.createElement('div'); actions.className = 'actions';
+    const resumeBtn = document.createElement('button');
+    resumeBtn.className = 'btn'; resumeBtn.textContent = 'Restore Project';
+    resumeBtn.title = 'Pick up exactly where you left off';
+    resumeBtn.addEventListener('click', ()=> kind==='editor' ? resumeEditorProject(proj) : resumePlaceProject(proj));
+    const discardBtn = document.createElement('button');
+    discardBtn.className = 'btn'; discardBtn.textContent = 'Delete';
+    discardBtn.title = 'Delete this saved project';
+    discardBtn.addEventListener('click', async ()=>{
+      await projectDbDelete(kind);
+      el.remove();
+      if(!document.getElementById('resumeCards').children.length) document.getElementById('resumeCards').style.display = 'none';
+    });
+    actions.append(resumeBtn, discardBtn);
+    el.append(img, meta, actions);
+    return el;
+  }
+
+  async function initResumeCards(){
+    const container = document.getElementById('resumeCards');
+    const [editorProj, placeProj] = await Promise.all([projectDbGet('editor'), projectDbGet('place')]);
+    container.innerHTML = '';
+    if(editorProj) container.appendChild(buildResumeCard('editor', editorProj));
+    if(placeProj) container.appendChild(buildResumeCard('place', placeProj));
+    container.style.display = container.children.length ? 'flex' : 'none';
+  }
+
+  // ---------- Bottom menu: Save.../Restore, reachable from any screen ----------
+  document.getElementById('bottomSaveBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('bottomSaveBtn');
+    clearTimeout(editorSaveDebounce); clearTimeout(placeSaveDebounce);
+    let saved = false;
+    if(currentScreenName==='editor') saved = await saveEditorProjectNow();
+    else if(currentScreenName==='place') saved = await savePlaceProjectNow();
+    toast(saved ? 'Project saved.' : 'Nothing to save yet — load a photo first.', !saved);
+    if(saved) btn.title = 'Last saved just now';
+  });
+  document.getElementById('bottomRestoreBtn').addEventListener('click', async ()=>{
+    const wrap = openModal('Restore Project', '<div id="restoreModalList" class="saveNote">Loading…</div>');
+    const list = wrap.querySelector('#restoreModalList');
+    const [editorProj, placeProj] = await Promise.all([projectDbGet('editor'), projectDbGet('place')]);
+    list.textContent = '';
+    list.className = '';
+    if(!editorProj && !placeProj){
+      list.className = 'saveNote';
+      list.textContent = 'No saved projects yet — they appear here automatically as you work.';
+      return;
+    }
+    list.style.display = 'flex'; list.style.flexDirection = 'column'; list.style.gap = '.6rem';
+    if(editorProj) list.appendChild(buildResumeCard('editor', editorProj));
+    if(placeProj) list.appendChild(buildResumeCard('place', placeProj));
+    list.addEventListener('click', (e)=>{
+      if(e.target.tagName==='BUTTON' && e.target.textContent==='Restore Project') setTimeout(()=>wrap.remove(), 30);
+    });
+  });
 
   // ---------- Image loading ----------
   function resetEditorState(){
@@ -1096,6 +1365,7 @@
     renderReviewQueued = true;
     requestAnimationFrame(()=>{
       renderReviewQueued = false;
+      scheduleEditorProjectSave();
       const hasContent = mask && mask.some(v=>v>20);
       if(!hasContent){
         emptyReview.style.display='block';
@@ -1520,6 +1790,7 @@
     placeCtx.drawImage(placeSpriteCanvas, -placeSpriteCanvas.width/2, -placeSpriteCanvas.height/2);
     placeCtx.restore();
     drawHandles();
+    schedulePlaceProjectSave();
   }
 
   function drawHandles(){
@@ -1728,7 +1999,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+72b03f32';
+  const APP_VERSION = '1.0+185f913f';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -2045,6 +2316,7 @@
   syncInstallUI();
   try{ history.replaceState({ screen:'upload' }, ''); }catch(e){} // the first screen shown on load establishes the baseline
   maybeShowInstallPrompt();
+  initResumeCards();
   checkForUpdate();
   document.addEventListener('visibilitychange', ()=>{
     if(document.visibilityState==='visible') checkForUpdate();
