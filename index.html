@@ -112,6 +112,117 @@
   .toolbar .divider{ width:1px; align-self:stretch; background:var(--border); margin:0 .2rem; }
   .badge{ font-size:.72rem; color:var(--dim); padding:.15rem .5rem; border:1px solid var(--border); border-radius:99px; }
 
+  /* ---------- Header app switcher ---------- */
+  #appNav{ margin-top:.1rem; }
+  #appNav .btn{ padding:.32rem .8rem; font-size:.78rem; }
+
+  /* ---------- Floor Plan screen ---------- */
+  #floorplanScreen{ display:block; }
+  .fp-toolbar .fp-dim-input{
+    width:5.5rem; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:6px; padding:.3rem .45rem; font-size:.82rem;
+  }
+  .fp-toolbar .spacer{ flex:1; }
+  .fp-layout{ display:grid; grid-template-columns:1fr; gap:.9rem; align-items:start; }
+  @media (min-width:900px){ .fp-layout{ grid-template-columns:1fr 300px; } }
+
+  .fp-main{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:.8rem 1rem 1rem;
+  }
+  .fp-title{
+    margin:.1rem 0 .7rem; font-size:1.15rem; font-weight:700; color:var(--text);
+    outline:none; border-radius:6px; padding:.15rem .3rem; display:inline-block;
+  }
+  .fp-title:hover, .fp-title:focus{ background:var(--panel2); }
+  .fp-canvas-wrap{
+    overflow:auto; border-radius:10px; background:#0e1013;
+    background-image:
+      linear-gradient(45deg,#171a1f 25%,transparent 25%),
+      linear-gradient(-45deg,#171a1f 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#171a1f 75%),
+      linear-gradient(-45deg,transparent 75%,#171a1f 75%);
+    background-size:22px 22px; background-position:0 0,0 11px,11px -11px,-11px 0px;
+    padding:40px;
+  }
+  .fp-canvas{
+    position:relative; background:var(--panel2);
+    border:3px solid var(--text); box-sizing:content-box;
+  }
+  .fp-opening{
+    position:absolute; background:var(--accent); opacity:.85;
+    cursor:pointer;
+  }
+  .fp-opening.window{ background:var(--accent-dim); }
+  .fp-opening-label{
+    position:absolute; font-size:.62rem; color:var(--dim); white-space:nowrap;
+    background:var(--panel); padding:0 .25rem; border-radius:4px; pointer-events:none;
+  }
+
+  .fp-item{
+    position:absolute; display:flex; align-items:center; justify-content:center;
+    background:rgba(64,208,181,.14); border:1.5px solid var(--accent-dim);
+    border-radius:4px; cursor:grab; touch-action:none; user-select:none;
+    flex-direction:column; gap:.1rem; text-align:center;
+  }
+  .fp-item:active{ cursor:grabbing; }
+  .fp-item.selected{ border-color:var(--accent); box-shadow:0 0 0 2px rgba(64,208,181,.35); z-index:5; }
+  .fp-item-label{
+    font-size:.68rem; font-weight:600; color:var(--text); outline:none;
+    max-width:92%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    border-radius:3px; padding:0 .15rem;
+  }
+  .fp-item-label:hover, .fp-item-label:focus{ background:var(--panel2); white-space:normal; }
+  .fp-item-dims{ font-size:.6rem; color:var(--dim); display:flex; gap:.2rem; }
+  .fp-item-dims input{
+    width:2.6rem; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:4px; font-size:.6rem; padding:0 .2rem; text-align:center;
+  }
+  .fp-rotate-handle{
+    position:absolute; top:-18px; left:50%; transform:translateX(-50%);
+    width:9px; height:9px; border-radius:50%; background:var(--accent);
+    cursor:grab; display:none;
+  }
+  .fp-item.selected .fp-rotate-handle{ display:block; }
+  .fp-rotate-handle::before{
+    content:""; position:absolute; top:9px; left:50%; width:1px; height:9px;
+    background:var(--accent); transform:translateX(-50%);
+  }
+  .fp-del-btn{
+    position:absolute; top:-10px; right:-10px; width:18px; height:18px; border-radius:50%;
+    background:var(--danger); color:#fff; border:none; font-size:.7rem; line-height:1;
+    cursor:pointer; display:none; align-items:center; justify-content:center;
+  }
+  .fp-item.selected .fp-del-btn{ display:flex; }
+
+  .fp-hint{ margin:.6rem 0 0; font-size:.74rem; color:var(--dim); }
+
+  .fp-side{ display:flex; flex-direction:column; gap:.7rem; }
+  .fp-panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:.7rem .8rem;
+  }
+  .fp-panel-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:.5rem; }
+  .fp-panel-head h3{ margin:0; font-size:.82rem; color:var(--dim); text-transform:uppercase; letter-spacing:.04em; }
+  .fp-add-row{
+    width:1.5rem; height:1.5rem; border-radius:50%; border:1px solid var(--border);
+    background:var(--panel2); color:var(--accent); font-size:.9rem; line-height:1; cursor:pointer;
+  }
+  .fp-list{ display:flex; flex-direction:column; gap:.4rem; }
+  .fp-row{
+    display:flex; align-items:center; gap:.35rem; font-size:.74rem;
+  }
+  .fp-row input[type=text], .fp-row select, .fp-row input[type=number]{
+    background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:5px; padding:.25rem .35rem; font-size:.72rem; min-width:0;
+  }
+  .fp-row input[type=text].fp-row-grow{ flex:1; min-width:3rem; }
+  .fp-row input[type=number]{ width:3.4rem; }
+  .fp-row input[type=color]{ width:1.4rem; height:1.4rem; padding:0; border:none; background:none; flex:0 0 auto; }
+  .fp-row-remove{
+    flex:0 0 auto; width:1.3rem; height:1.3rem; border-radius:50%; border:none;
+    background:var(--panel2); color:var(--danger); cursor:pointer; font-size:.7rem; line-height:1;
+  }
+
   .workspace{ display:grid; grid-template-columns:1fr; gap:.9rem; align-items:start; }
 
   .stagePanel{
@@ -293,12 +404,66 @@
     <button class="btn" id="startOverBtn" style="display:none;" title="Discard this photo and start over with a new one">Start over</button>
   </div>
   <span class="sub">Room photos to editable floor plans — plus cut, hide and paste objects in photos</span>
+  <div class="segGroup" id="appNav">
+    <button class="btn active" data-app="floorplan">Floor Plan</button>
+    <button class="btn" data-app="phototools">Photo Tools</button>
+  </div>
 </header>
 
 <main>
 
+  <!-- ============ FLOOR PLAN SCREEN ============ -->
+  <section id="floorplanScreen">
+    <div class="toolbar fp-toolbar">
+      <button class="btn" id="fpAddFurnitureBtn" title="Add a piece of furniture to the plan">+ Furniture</button>
+      <button class="btn" id="fpAddOpeningBtn" title="Add a door or window opening">+ Opening</button>
+      <div class="divider"></div>
+      <label class="mini">Room W <input type="text" id="fpRoomW" class="fp-dim-input" value="22'-6&quot;"></label>
+      <label class="mini">Room D <input type="text" id="fpRoomD" class="fp-dim-input" value="19'-0&quot;"></label>
+      <div class="spacer"></div>
+      <button class="btn" id="fpUndoBtn" disabled title="Undo the last change">Undo</button>
+      <button class="btn" id="fpResetBtn" title="Clear everything and start a blank plan">Clear plan</button>
+    </div>
+
+    <div class="fp-layout">
+      <div class="fp-main">
+        <h2 class="fp-title" id="fpTitle" contenteditable="true" spellcheck="false">Untitled Floor Plan</h2>
+        <div class="fp-canvas-wrap" id="fpCanvasWrap">
+          <div class="fp-canvas" id="fpCanvas"></div>
+        </div>
+        <p class="fp-hint">Drag a piece to move it &middot; drag the top dot to spin it &middot; tap it to select, then use the &times; to delete. Tap any dimension or label to edit it.</p>
+      </div>
+
+      <aside class="fp-side">
+        <div class="fp-panel">
+          <div class="fp-panel-head">
+            <h3>Openings</h3>
+            <button class="fp-add-row" id="fpOpeningsAdd" title="Add opening">+</button>
+          </div>
+          <div id="fpOpeningsList" class="fp-list"></div>
+        </div>
+
+        <div class="fp-panel">
+          <div class="fp-panel-head">
+            <h3>Legend</h3>
+            <button class="fp-add-row" id="fpLegendAdd" title="Add legend item">+</button>
+          </div>
+          <div id="fpLegendList" class="fp-list"></div>
+        </div>
+
+        <div class="fp-panel">
+          <div class="fp-panel-head">
+            <h3>Notes</h3>
+            <button class="fp-add-row" id="fpNotesAdd" title="Add note">+</button>
+          </div>
+          <div id="fpNotesList" class="fp-list"></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
   <!-- ============ UPLOAD SCREEN ============ -->
-  <section id="uploadScreen">
+  <section id="uploadScreen" style="display:none;">
     <div id="resumeCards" style="display:none; width:100%; max-width:640px; flex-direction:column; gap:.6rem;"></div>
 
     <div class="dropzone" id="dropzone">
@@ -475,6 +640,7 @@
   'use strict';
 
   // ---------- DOM ----------
+  const floorplanScreen = document.getElementById('floorplanScreen');
   const uploadScreen = document.getElementById('uploadScreen');
   const editorScreen = document.getElementById('editorScreen');
   const dropzone = document.getElementById('dropzone');
@@ -535,10 +701,15 @@
   // straight to the Upload screen no matter how deep the user is.
   let currentScreenName = 'upload';
   function showScreen(name){
+    floorplanScreen.style.display = name==='floorplan' ? 'block' : 'none';
     uploadScreen.style.display = name==='upload' ? 'flex' : 'none';
     editorScreen.style.display = name==='editor' ? 'block' : 'none';
     document.getElementById('placeScreen').style.display = name==='place' ? 'block' : 'none';
-    startOverBtn.style.display = name==='upload' ? 'none' : 'inline-block';
+    startOverBtn.style.display = (name==='upload' || name==='floorplan') ? 'none' : 'inline-block';
+    document.getElementById('bottomBar').style.display = name==='floorplan' ? 'none' : 'flex';
+    [...document.getElementById('appNav').children].forEach(b=>{
+      b.classList.toggle('active', (b.dataset.app==='floorplan') === (name==='floorplan'));
+    });
     currentScreenName = name;
     if(name==='upload' && typeof initResumeCards==='function') initResumeCards();
   }
@@ -547,8 +718,13 @@
     try{ history.pushState({ screen:name }, ''); }catch(e){}
   }
   window.addEventListener('popstate', (e)=>{
-    const target = (e.state && e.state.screen) || 'upload';
+    const target = (e.state && e.state.screen) || 'floorplan';
     showScreen(target);
+  });
+  document.getElementById('appNav').addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-app]');
+    if(!btn) return;
+    navigateTo(btn.dataset.app==='floorplan' ? 'floorplan' : 'upload');
   });
 
   // ---------- State ----------
@@ -2477,7 +2653,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+6e87a74b';
+  const APP_VERSION = '1.0+7bf0d8ad';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -2794,11 +2970,400 @@
     }, { passive:true });
   })();
 
+  // ---------- Floor Plan editor ----------
+  // Self-contained module: a room (width/depth in feet), a list of wall
+  // openings (doors/windows), a list of furniture items (draggable,
+  // rotatable, deletable, resizable), plus editable title/legend/notes.
+  // Everything here is local -- no photo analysis yet (see general notes in
+  // the app about that being a separate, opt-in step).
+  const FP_SCALE = 22; // px per foot
+  const FP_STORAGE_KEY = 'floorplanner-plan-v1';
+  let fpState = null;
+  let fpSelectedId = null;
+  let fpHistory = [];
+  let fpIdSeq = 1;
+
+  function fpDefaultState(){
+    return {
+      title: 'Sunroom / Great Room',
+      room: { w: 22.5, d: 19 },
+      openings: [
+        { id: fpIdSeq++, wall:'back', offset:2.5, width:5, label:"French doors" },
+        { id: fpIdSeq++, wall:'back', offset:9,   width:5, label:"French doors" },
+        { id: fpIdSeq++, wall:'back', offset:15.5,width:5, label:"French doors" },
+        { id: fpIdSeq++, wall:'right', offset:3.5, width:5, label:"Deck door" },
+        { id: fpIdSeq++, wall:'left', offset:3, width:2.67, label:"Ext. door" },
+      ],
+      furniture: [
+        { id: fpIdSeq++, label:'Sectional', w:90, d:38, x:5.5, d2x:0, cx:12.5, cy:12, rot:0 },
+        { id: fpIdSeq++, label:'Ottoman', w:40, d:40, cx:10.5, cy:14.2, rot:0 },
+        { id: fpIdSeq++, label:'TV console', w:60, d:18, cx:20, cy:16.5, rot:0 },
+      ],
+      legend: [
+        { id: fpIdSeq++, color:'#40d0b5', label:'Furniture', desc:'drag to move, top dot to spin' },
+        { id: fpIdSeq++, color:'#2b8f7c', label:'Opening', desc:'door or window in a wall' },
+      ],
+      notes: [
+        'Dimensions are estimates unless you\'ve entered a measured value.',
+        'Tap any number or label in this plan to edit it directly.',
+      ],
+    };
+  }
+
+  function fpLoad(){
+    try{
+      const raw = localStorage.getItem(FP_STORAGE_KEY);
+      if(raw){
+        const parsed = JSON.parse(raw);
+        fpIdSeq = parsed.__idSeq || 1000;
+        delete parsed.__idSeq;
+        return parsed;
+      }
+    }catch(e){}
+    return fpDefaultState();
+  }
+  function fpSave(){
+    try{
+      const toSave = Object.assign({}, fpState, { __idSeq: fpIdSeq });
+      localStorage.setItem(FP_STORAGE_KEY, JSON.stringify(toSave));
+    }catch(e){}
+  }
+  function fpPushHistory(){
+    fpHistory.push(JSON.stringify(fpState));
+    if(fpHistory.length>30) fpHistory.shift();
+    document.getElementById('fpUndoBtn').disabled = false;
+  }
+  function fpUndo(){
+    if(!fpHistory.length) return;
+    fpState = JSON.parse(fpHistory.pop());
+    document.getElementById('fpUndoBtn').disabled = fpHistory.length===0;
+    fpSave();
+    fpRender();
+  }
+
+  function fpFmtFeet(ft){
+    const whole = Math.floor(ft + 1e-6);
+    const inches = Math.round((ft-whole)*12);
+    return inches===0 ? `${whole}'-0"` : (inches===12 ? `${whole+1}'-0"` : `${whole}'-${inches}"`);
+  }
+  function fpParseFeet(str){
+    if(typeof str !== 'string') return null;
+    const m = str.match(/(-?\d+(?:\.\d+)?)\s*'?\s*-?\s*(\d+(?:\.\d+)?)?\s*"?/);
+    if(!m) return null;
+    const ft = parseFloat(m[1]);
+    const inch = m[2] ? parseFloat(m[2]) : 0;
+    if(isNaN(ft)) return null;
+    return ft + (isNaN(inch)?0:inch)/12;
+  }
+
+  // Lightweight selection: toggles the CSS class on existing DOM nodes
+  // instead of a full fpRender(), so it's safe to call mid-drag without
+  // yanking the element being dragged out of the document.
+  function fpSelect(id){
+    fpSelectedId = id;
+    document.querySelectorAll('#fpCanvas .fp-item').forEach(node=>{
+      node.classList.toggle('selected', Number(node.dataset.id)===id);
+    });
+  }
+
+  function fpRender(){
+    const canvas = document.getElementById('fpCanvas');
+    const w = fpState.room.w * FP_SCALE, d = fpState.room.d * FP_SCALE;
+    canvas.style.width = w+'px'; canvas.style.height = d+'px';
+    canvas.innerHTML = '';
+
+    // Openings, drawn as marks on the relevant wall edge
+    fpState.openings.forEach(op=>{
+      const el = document.createElement('div');
+      el.className = 'fp-opening' + (/window/i.test(op.label) ? ' window' : '');
+      el.title = op.label + ' — tap to edit in the Openings list';
+      const px = op.offset*FP_SCALE, pw = op.width*FP_SCALE;
+      const thickness = 4;
+      if(op.wall==='back'){ Object.assign(el.style,{left:px+'px',top:-thickness/2+'px',width:pw+'px',height:thickness+'px'}); }
+      else if(op.wall==='front'){ Object.assign(el.style,{left:px+'px',top:d-thickness/2+'px',width:pw+'px',height:thickness+'px'}); }
+      else if(op.wall==='left'){ Object.assign(el.style,{left:-thickness/2+'px',top:px+'px',width:thickness+'px',height:pw+'px'}); }
+      else { Object.assign(el.style,{left:w-thickness/2+'px',top:px+'px',width:thickness+'px',height:pw+'px'}); }
+      canvas.appendChild(el);
+    });
+
+    // Furniture
+    fpState.furniture.forEach(item=>{
+      const el = document.createElement('div');
+      el.className = 'fp-item' + (item.id===fpSelectedId ? ' selected' : '');
+      el.dataset.id = item.id;
+      const pw = (item.w/12)*FP_SCALE, pd = (item.d/12)*FP_SCALE;
+      const px = item.cx*FP_SCALE - pw/2, py = item.cy*FP_SCALE - pd/2;
+      Object.assign(el.style, {
+        left:px+'px', top:py+'px', width:pw+'px', height:pd+'px',
+        transform:`rotate(${item.rot||0}deg)`,
+      });
+
+      // Not editable by default -- a single click/drag anywhere on the item
+      // (including over the label) moves it; double-click the label to rename.
+      const label = document.createElement('div');
+      label.className = 'fp-item-label';
+      label.contentEditable = 'false';
+      label.spellcheck = false;
+      label.textContent = item.label;
+      label.title = 'Double-click to rename';
+      label.addEventListener('dblclick', (e)=>{
+        e.stopPropagation();
+        label.contentEditable = 'true';
+        label.focus();
+        document.execCommand && document.execCommand('selectAll', false, null);
+      });
+      label.addEventListener('blur', ()=>{
+        label.contentEditable = 'false';
+        item.label = label.textContent.trim()||'Item';
+        fpSave();
+      });
+      label.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); label.blur(); } });
+      el.appendChild(label);
+
+      const dims = document.createElement('div');
+      dims.className = 'fp-item-dims';
+      const wIn = document.createElement('input'); wIn.type='number'; wIn.value=Math.round(item.w); wIn.title='Width (in)';
+      const dIn = document.createElement('input'); dIn.type='number'; dIn.value=Math.round(item.d); dIn.title='Depth (in)';
+      [wIn,dIn].forEach(inp=>{
+        inp.addEventListener('pointerdown', e=>e.stopPropagation());
+        inp.addEventListener('change', ()=>{
+          fpPushHistory();
+          item.w = Math.max(4, parseFloat(wIn.value)||item.w);
+          item.d = Math.max(4, parseFloat(dIn.value)||item.d);
+          fpSave(); fpRender();
+        });
+      });
+      dims.appendChild(wIn); dims.appendChild(document.createTextNode('×')); dims.appendChild(dIn);
+      dims.appendChild(document.createTextNode('in'));
+      el.appendChild(dims);
+
+      const rotHandle = document.createElement('div');
+      rotHandle.className = 'fp-rotate-handle';
+      el.appendChild(rotHandle);
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'fp-del-btn'; delBtn.type='button'; delBtn.textContent = '×';
+      delBtn.title = 'Delete this item';
+      delBtn.addEventListener('pointerdown', e=>e.stopPropagation());
+      delBtn.addEventListener('click', ()=>{
+        fpPushHistory();
+        fpState.furniture = fpState.furniture.filter(f=>f.id!==item.id);
+        fpSelectedId = null;
+        fpSave(); fpRender();
+      });
+      el.appendChild(delBtn);
+
+      // Drag to move. Selecting on pointerdown must NOT call the full
+      // fpRender() (that rebuilds the whole canvas and would yank `el` out
+      // from under this very drag) -- just toggle the CSS class in place.
+      el.addEventListener('pointerdown', (e)=>{
+        // Only the truly-interactive children opt out of dragging (dimension
+        // inputs, the rotate handle, delete button, or a label mid-rename);
+        // everywhere else on the item, including the label text, starts a drag.
+        if(e.target.closest('input, .fp-rotate-handle, .fp-del-btn') || e.target.isContentEditable) return;
+        e.preventDefault(); // stop the browser's native text-selection drag from fighting this
+        fpSelect(item.id);
+        fpPushHistory();
+        const startX = e.clientX, startY = e.clientY, ocx = item.cx, ocy = item.cy;
+        try{ el.setPointerCapture(e.pointerId); }catch(err){}
+        function onMove(ev){
+          item.cx = ocx + (ev.clientX-startX)/FP_SCALE;
+          item.cy = ocy + (ev.clientY-startY)/FP_SCALE;
+          const pw2 = (item.w/12)*FP_SCALE, pd2 = (item.d/12)*FP_SCALE;
+          el.style.left = (item.cx*FP_SCALE - pw2/2)+'px';
+          el.style.top = (item.cy*FP_SCALE - pd2/2)+'px';
+        }
+        function onUp(){
+          el.removeEventListener('pointermove', onMove);
+          el.removeEventListener('pointerup', onUp);
+          fpSave();
+        }
+        el.addEventListener('pointermove', onMove);
+        el.addEventListener('pointerup', onUp);
+      });
+
+      // Drag rotate handle to spin
+      rotHandle.addEventListener('pointerdown', (e)=>{
+        e.stopPropagation();
+        e.preventDefault();
+        fpSelect(item.id);
+        fpPushHistory();
+        try{ rotHandle.setPointerCapture(e.pointerId); }catch(err){}
+        function onMove(ev){
+          const rect = el.getBoundingClientRect();
+          const ccx = rect.left+rect.width/2, ccy = rect.top+rect.height/2;
+          const angle = Math.atan2(ev.clientY-ccy, ev.clientX-ccx) * 180/Math.PI + 90;
+          item.rot = Math.round(angle/5)*5; // snap to 5-degree steps
+          el.style.transform = `rotate(${item.rot}deg)`;
+        }
+        function onUp(){
+          rotHandle.removeEventListener('pointermove', onMove);
+          rotHandle.removeEventListener('pointerup', onUp);
+          fpSave();
+        }
+        rotHandle.addEventListener('pointermove', onMove);
+        rotHandle.addEventListener('pointerup', onUp);
+      });
+
+      canvas.appendChild(el);
+    });
+
+    // Deselect on empty-canvas tap
+    canvas.addEventListener('pointerdown', (e)=>{
+      if(e.target===canvas){ fpSelectedId=null; fpRender(); }
+    });
+
+    fpRenderSidePanels();
+  }
+
+  function fpRenderSidePanels(){
+    // Openings
+    const opList = document.getElementById('fpOpeningsList');
+    opList.innerHTML = '';
+    fpState.openings.forEach(op=>{
+      const row = document.createElement('div'); row.className='fp-row';
+      row.innerHTML = `
+        <select class="fp-op-wall">
+          <option value="back">Back</option><option value="right">Right</option>
+          <option value="front">Front</option><option value="left">Left</option>
+        </select>
+        <input type="text" class="fp-row-grow fp-op-label" placeholder="Label">
+        <input type="number" class="fp-op-offset" step="0.5" title="Offset from corner (ft)">
+        <input type="number" class="fp-op-width" step="0.5" title="Width (ft)">
+        <button class="fp-row-remove" type="button" title="Remove">&times;</button>`;
+      row.querySelector('.fp-op-wall').value = op.wall;
+      row.querySelector('.fp-op-label').value = op.label;
+      row.querySelector('.fp-op-offset').value = op.offset;
+      row.querySelector('.fp-op-width').value = op.width;
+      row.querySelector('.fp-op-wall').addEventListener('change', e=>{ op.wall=e.target.value; fpSave(); fpRender(); });
+      row.querySelector('.fp-op-label').addEventListener('change', e=>{ op.label=e.target.value; fpSave(); });
+      row.querySelector('.fp-op-offset').addEventListener('change', e=>{ op.offset=parseFloat(e.target.value)||0; fpSave(); fpRender(); });
+      row.querySelector('.fp-op-width').addEventListener('change', e=>{ op.width=parseFloat(e.target.value)||1; fpSave(); fpRender(); });
+      row.querySelector('.fp-row-remove').addEventListener('click', ()=>{
+        fpPushHistory();
+        fpState.openings = fpState.openings.filter(o=>o.id!==op.id);
+        fpSave(); fpRender();
+      });
+      opList.appendChild(row);
+    });
+
+    // Legend
+    const legList = document.getElementById('fpLegendList');
+    legList.innerHTML = '';
+    fpState.legend.forEach(item=>{
+      const row = document.createElement('div'); row.className='fp-row';
+      row.innerHTML = `
+        <input type="color" class="fp-leg-color">
+        <input type="text" class="fp-row-grow fp-leg-label" placeholder="Label">
+        <input type="text" class="fp-row-grow fp-leg-desc" placeholder="Description">
+        <button class="fp-row-remove" type="button" title="Remove">&times;</button>`;
+      row.querySelector('.fp-leg-color').value = item.color;
+      row.querySelector('.fp-leg-label').value = item.label;
+      row.querySelector('.fp-leg-desc').value = item.desc;
+      row.querySelector('.fp-leg-color').addEventListener('change', e=>{ item.color=e.target.value; fpSave(); });
+      row.querySelector('.fp-leg-label').addEventListener('change', e=>{ item.label=e.target.value; fpSave(); });
+      row.querySelector('.fp-leg-desc').addEventListener('change', e=>{ item.desc=e.target.value; fpSave(); });
+      row.querySelector('.fp-row-remove').addEventListener('click', ()=>{
+        fpPushHistory();
+        fpState.legend = fpState.legend.filter(l=>l.id!==item.id);
+        fpSave(); fpRender();
+      });
+      legList.appendChild(row);
+    });
+
+    // Notes
+    const noteList = document.getElementById('fpNotesList');
+    noteList.innerHTML = '';
+    fpState.notes.forEach((text, idx)=>{
+      const row = document.createElement('div'); row.className='fp-row';
+      row.innerHTML = `
+        <input type="text" class="fp-row-grow fp-note-text">
+        <button class="fp-row-remove" type="button" title="Remove">&times;</button>`;
+      row.querySelector('.fp-note-text').value = text;
+      row.querySelector('.fp-note-text').addEventListener('change', e=>{ fpState.notes[idx]=e.target.value; fpSave(); });
+      row.querySelector('.fp-row-remove').addEventListener('click', ()=>{
+        fpPushHistory();
+        fpState.notes = fpState.notes.filter((_,i)=>i!==idx);
+        fpSave(); fpRender();
+      });
+      noteList.appendChild(row);
+    });
+  }
+
+  function initFloorPlan(){
+    fpState = fpLoad();
+    document.getElementById('fpTitle').textContent = fpState.title;
+    document.getElementById('fpRoomW').value = fpFmtFeet(fpState.room.w);
+    document.getElementById('fpRoomD').value = fpFmtFeet(fpState.room.d);
+    fpRender();
+
+    document.getElementById('fpTitle').addEventListener('blur', (e)=>{
+      fpState.title = e.target.textContent.trim() || 'Untitled Floor Plan';
+      fpSave();
+    });
+    document.getElementById('fpRoomW').addEventListener('change', (e)=>{
+      const v = fpParseFeet(e.target.value);
+      if(v && v>1){ fpPushHistory(); fpState.room.w = v; e.target.value = fpFmtFeet(v); fpSave(); fpRender(); }
+      else { e.target.value = fpFmtFeet(fpState.room.w); }
+    });
+    document.getElementById('fpRoomD').addEventListener('change', (e)=>{
+      const v = fpParseFeet(e.target.value);
+      if(v && v>1){ fpPushHistory(); fpState.room.d = v; e.target.value = fpFmtFeet(v); fpSave(); fpRender(); }
+      else { e.target.value = fpFmtFeet(fpState.room.d); }
+    });
+
+    document.getElementById('fpAddFurnitureBtn').addEventListener('click', ()=>{
+      fpPushHistory();
+      fpState.furniture.push({
+        id: fpIdSeq++, label:'New item', w:24, d:24,
+        cx: fpState.room.w/2, cy: fpState.room.d/2, rot:0,
+      });
+      fpSave(); fpRender();
+    });
+    document.getElementById('fpAddOpeningBtn').addEventListener('click', ()=>{
+      fpPushHistory();
+      fpState.openings.push({ id: fpIdSeq++, wall:'back', offset:1, width:3, label:'Door' });
+      fpSave(); fpRender();
+    });
+    document.getElementById('fpOpeningsAdd').addEventListener('click', ()=>document.getElementById('fpAddOpeningBtn').click());
+    document.getElementById('fpLegendAdd').addEventListener('click', ()=>{
+      fpPushHistory();
+      fpState.legend.push({ id: fpIdSeq++, color:'#40d0b5', label:'New item', desc:'' });
+      fpSave(); fpRender();
+    });
+    document.getElementById('fpNotesAdd').addEventListener('click', ()=>{
+      fpPushHistory();
+      fpState.notes.push('');
+      fpSave(); fpRender();
+    });
+    document.getElementById('fpUndoBtn').addEventListener('click', fpUndo);
+    document.getElementById('fpResetBtn').addEventListener('click', ()=>{
+      if(!confirm('Clear this floor plan and start blank?')) return;
+      fpPushHistory();
+      fpState = { title:'Untitled Floor Plan', room:{w:20,d:16}, openings:[], furniture:[], legend:[], notes:[] };
+      document.getElementById('fpTitle').textContent = fpState.title;
+      document.getElementById('fpRoomW').value = fpFmtFeet(fpState.room.w);
+      document.getElementById('fpRoomD').value = fpFmtFeet(fpState.room.d);
+      fpSave(); fpRender();
+    });
+
+    document.addEventListener('keydown', (e)=>{
+      if(currentScreenName!=='floorplan') return;
+      if((e.key==='Delete'||e.key==='Backspace') && fpSelectedId!==null && document.activeElement.tagName!=='INPUT' && !document.activeElement.isContentEditable){
+        fpPushHistory();
+        fpState.furniture = fpState.furniture.filter(f=>f.id!==fpSelectedId);
+        fpSelectedId = null; fpSave(); fpRender();
+      }
+    });
+  }
+
   // ---------- PWA: bootstrap ----------
   syncInstallUI();
-  try{ history.replaceState({ screen:'upload' }, ''); }catch(e){} // the first screen shown on load establishes the baseline
+  showScreen('floorplan'); // Floor Plan is FloorPlanner's home screen
+  try{ history.replaceState({ screen:'floorplan' }, ''); }catch(e){} // the first screen shown on load establishes the baseline
   maybeShowInstallPrompt();
   initResumeCards();
+  initFloorPlan();
   checkForUpdate();
   document.addEventListener('visibilitychange', ()=>{
     if(document.visibilityState==='visible') checkForUpdate();
