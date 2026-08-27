@@ -114,8 +114,13 @@
     touch-action:none;
   }
   #stageCanvas{ display:block; cursor:crosshair; }
-  #stageCanvas.eraseMode{ cursor:cell; }
   #stageCanvas.panMode{ cursor:grab; }
+  #stageCanvas.locked{ cursor:default; opacity:.92; }
+  .lockedBadge{
+    display:inline-flex; align-items:center; gap:.35rem; color:var(--accent);
+    font-size:.72rem; font-weight:600; padding:.15rem .5rem; border:1px solid var(--accent);
+    border-radius:99px;
+  }
 
   .reviewPanel{
     background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:hidden;
@@ -290,11 +295,17 @@
   <section id="editorScreen">
 
     <div class="toolbar">
+      <span class="mini" style="font-weight:700; color:var(--text);">Object:</span>
       <div class="segGroup" id="modeGroup">
-        <button class="btn active" data-mode="add" title="Tap the object you want to keep">Select</button>
-        <button class="btn" data-mode="remove" title="Tap a spot to remove it from the selection">Remove</button>
-        <button class="btn" data-mode="brush" title="Freehand paint to add or erase, for pixel-level cleanup">Brush</button>
-        <button class="btn" data-mode="invisible" title="Tap an object to erase it, filled in with the surrounding background">Invisible</button>
+        <button class="btn active" data-mode="add" title="Tap the object you want to isolate">Isolate</button>
+        <button class="btn" data-mode="invisible" title="Tap an object to remove it from the photo, filled in with the surrounding background">Remove</button>
+        <button class="btn" id="insertModeBtn" title="Bring a saved cutout into this photo">Insert</button>
+      </div>
+      <input type="file" id="insertFileInput" accept="image/*" style="display:none;">
+
+      <div class="divider"></div>
+
+      <div class="segGroup" id="toolGroup">
         <button class="btn" data-mode="pan" title="Drag to pan when zoomed in">Pan</button>
       </div>
 
@@ -304,14 +315,6 @@
         <input type="range" id="sensSlider" min="5" max="70" value="26">
       </label>
 
-      <div class="divider" id="brushDivider" style="display:none;"></div>
-      <label class="mini" id="brushSizeRow" style="display:none;">Brush size
-        <input type="range" id="brushSlider" min="4" max="120" value="26">
-      </label>
-      <div class="segGroup" id="brushModeGroup" style="display:none;">
-        <button class="btn active" data-brushmode="add">Add</button>
-        <button class="btn" data-brushmode="erase">Erase</button>
-      </div>
 
       <div class="divider"></div>
       <label class="mini">Zoom
@@ -321,12 +324,15 @@
       <div class="divider"></div>
       <button class="btn" id="undoBtn" disabled title="Undo the last edit">Undo</button>
       <button class="btn" id="clearMaskBtn" title="Clear the current selection">Clear selection</button>
+      <button class="btn" id="confirmSelectionBtn" style="display:none;" title="Lock in this selection so a stray tap can't change it">Looks good</button>
+      <button class="btn" id="editAgainBtn" style="display:none;" title="Unlock the selection to keep tapping/refining it">Edit again</button>
 
       <div class="divider"></div>
       <button class="btn" id="saveWholeBtn" disabled title="Save the whole photo as a file, including any Invisible-mode edits">Save whole photo…</button>
       <button class="btn" id="copyWholeBtn" disabled title="Copy the whole photo to your clipboard, including any Invisible-mode edits">Copy whole photo</button>
 
       <div class="spacer"></div>
+      <span class="badge" id="samStatusBadge" title="Smart select uses an on-device object-recognition model, downloaded once and cached"></span>
       <span class="badge" id="pointCountBadge">0 points</span>
     </div>
     <div class="saveNote" id="invisibleNote" style="margin-bottom:.6rem;"></div>
@@ -335,6 +341,7 @@
       <div class="stagePanel">
         <div class="stageHead">
           <span id="stageStatus">Loaded photo</span>
+          <span class="lockedBadge" id="lockedBadge" style="display:none;">Selection locked</span>
           <span id="stageDims" class="badge"></span>
         </div>
         <div class="stageScroll" id="stageScroll">
@@ -375,6 +382,7 @@
             <div class="saveNote" id="copyNote"></div>
             <button class="btn" id="placeBtn" disabled title="Load a background photo and drop this cutout onto it">Place onto another photo</button>
             <input type="file" id="placeFileInput" accept="image/*" style="display:none;">
+            <button class="btn" id="eraseSelectedBtn" disabled title="Erase the selected object from the photo itself, filled in with the surrounding background">Erase Selected from Photo</button>
           </div>
         </div>
       </div>
@@ -468,18 +476,19 @@
   const popoutBtn = document.getElementById('popoutBtn');
 
   const modeGroup = document.getElementById('modeGroup');
-  const brushModeGroup = document.getElementById('brushModeGroup');
-  const brushSizeRow = document.getElementById('brushSizeRow');
-  const brushDivider = document.getElementById('brushDivider');
-  const brushSlider = document.getElementById('brushSlider');
+  const toolGroup = document.getElementById('toolGroup');
   const sensSlider = document.getElementById('sensSlider');
   const zoomSlider = document.getElementById('zoomSlider');
   const undoBtn = document.getElementById('undoBtn');
   const clearMaskBtn = document.getElementById('clearMaskBtn');
+  const confirmSelectionBtn = document.getElementById('confirmSelectionBtn');
+  const editAgainBtn = document.getElementById('editAgainBtn');
+  const lockedBadge = document.getElementById('lockedBadge');
   const pointCountBadge = document.getElementById('pointCountBadge');
   const saveWholeBtn = document.getElementById('saveWholeBtn');
   const copyWholeBtn = document.getElementById('copyWholeBtn');
   const invisibleNote = document.getElementById('invisibleNote');
+  const eraseSelectedBtn = document.getElementById('eraseSelectedBtn');
 
   const formatSelect = document.getElementById('formatSelect');
   const bgColor = document.getElementById('bgColor');
@@ -532,14 +541,15 @@
   let displayScale = 1;                        // work-canvas px -> stage screen px (CSS px)
   let baseFileName = 'photo';
 
-  let mode = 'add';          // add | remove | brush | pan
-  let brushMode = 'add';     // add | erase
+  let mode = 'add';          // add | invisible | pan
+  let isolateLocked = false; // true once the current selection is confirmed via "Looks good" -- blocks further taps from changing it until "Edit again"
   let points = [];           // {x,y,label} in work coords, for badge/undo bookkeeping
   let history = [];          // stack of Uint8ClampedArray mask snapshots
   const HISTORY_CAP = 25;
 
   let isPointerDown = false;
   let panStart = null;
+  let segmentationBusy = false; // guards against overlapping async click-to-select requests
 
   // ---------- Utility ----------
   function toast(msg, isErr){
@@ -721,6 +731,7 @@
     workRGB = workImageData.data;
     edgeMag = computeEdgeMagnitude(workRGB, workW, workH);
     mask = new Uint8ClampedArray(proj.maskBuffer.slice(0));
+    resetSamForNewPhoto();
 
     resetEditorState();
     points = (proj.points||[]).slice();
@@ -840,9 +851,11 @@
     copyBtn.disabled = true;
     copyNote.textContent = '';
     placeBtn.disabled = true;
+    eraseSelectedBtn.disabled = true;
     saveWholeBtn.disabled = false;
     copyWholeBtn.disabled = false;
     invisibleNote.textContent = '';
+    setIsolateLocked(false);
   }
 
   async function loadImageSource(source, name){
@@ -880,6 +893,7 @@
 
     edgeMag = computeEdgeMagnitude(workRGB, workW, workH);
     mask = new Uint8ClampedArray(workW*workH); // all 0
+    resetSamForNewPhoto();
 
     resetEditorState();
     navigateTo('editor');
@@ -968,7 +982,12 @@
   }
 
   function regionGrow(seedX, seedY){
-    const sens = parseInt(sensSlider.value,10); // 5..70
+    const sliderMin = parseInt(sensSlider.min,10), sliderMax = parseInt(sensSlider.max,10);
+    // Slider is drawn left-to-right as raw min->max, but "sensitivity" here means
+    // how tightly the selection is held to the clicked spot -- dragging right
+    // should mean MORE sensitive/tighter, which is the opposite of raw value
+    // increasing the tolerance, so the reading is inverted before use.
+    const sens = (sliderMin + sliderMax) - parseInt(sensSlider.value,10);
     const edgeThreshold = 18 + sens * 3.2;       // higher sensitivity -> crosses stronger edges
     const colorTolerance = 14 + sens * 1.6;
 
@@ -1162,8 +1181,188 @@
     return cur;
   }
 
-  function eraseObjectAt(x, y){
-    const region = regionGrow(x, y);
+  // ---------- Smart selection (on-device SAM) ----------
+  // Point-prompted object segmentation running fully on-device via WebGPU
+  // (Xenova/slimsam-77-uniform, ~20MB one-time download, cached by the
+  // browser after first use). The full sam-vit-base model gave cleaner
+  // masks in isolated testing but crashed the browser when loaded inside
+  // this app specifically -- using the smaller distilled model instead.
+  // Falls back to regionGrow() above -- silently, no error shown -- if
+  // WebGPU isn't available or the model fails to load for any reason, so
+  // this is always a strict enhancement, never a hard requirement.
+  let samAvailable = null;   // null=not checked yet, true=ready to use, false=unavailable this session
+  let samModel = null, samProcessor = null, samLib = null;
+  let samImageInputs = null, samImageEmbeddings = null, samEmbeddingsDirty = true;
+  let samLoadingPromise = null;
+  let samCycleState = null;  // {wx,wy,t,order,pos} -- lets a same-spot re-click cycle candidates
+
+  function samStatus(text){
+    const el = document.getElementById('samStatusBadge');
+    if(el) el.textContent = text;
+  }
+
+  async function getSamLib(){
+    if(!samLib) samLib = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0');
+    return samLib;
+  }
+
+  function initSam(){
+    if(samLoadingPromise) return samLoadingPromise;
+    samLoadingPromise = (async ()=>{
+      try{
+        if(!navigator.gpu) throw new Error('WebGPU unavailable');
+        const adapter = await navigator.gpu.requestAdapter();
+        if(!adapter) throw new Error('No WebGPU adapter');
+        samStatus('Loading smart select…');
+        const { SamModel, AutoProcessor } = await getSamLib();
+        samModel = await SamModel.from_pretrained('Xenova/slimsam-77-uniform', { dtype:'fp16', device:'webgpu' });
+        samProcessor = await AutoProcessor.from_pretrained('Xenova/slimsam-77-uniform');
+        samAvailable = true;
+        samStatus('Smart select ready');
+        setTimeout(()=>samStatus(''), 2200);
+      }catch(err){
+        console.warn('Smart selection unavailable, using basic selection instead:', err);
+        samAvailable = false;
+        samStatus('');
+      }
+    })();
+    return samLoadingPromise;
+  }
+
+  // Called whenever a different photo becomes the active one -- the previous
+  // photo's embeddings/candidates are meaningless for a new image.
+  function resetSamForNewPhoto(){
+    samImageEmbeddings = null; samImageInputs = null; samEmbeddingsDirty = true; samCycleState = null;
+    initSam(); // fire-and-forget: starts the one-time model download/load early, while the user looks at the photo
+  }
+
+  async function ensureSamEmbeddings(){
+    if(!samAvailable) return false;
+    if(!samEmbeddingsDirty && samImageEmbeddings) return true;
+    try{
+      const { RawImage } = await getSamLib();
+      samStatus('Analyzing photo…');
+      const blob = await new Promise(res => originalCanvas.toBlob(res, 'image/png'));
+      const rawImage = await RawImage.fromBlob(blob);
+      samImageInputs = await samProcessor(rawImage);
+      samImageEmbeddings = await samModel.get_image_embeddings(samImageInputs);
+      samEmbeddingsDirty = false;
+      samStatus('');
+      return true;
+    }catch(err){
+      console.warn('Smart selection embedding failed, using basic selection instead:', err);
+      samAvailable = false;
+      samStatus('');
+      return false;
+    }
+  }
+
+  // Runs point-prompted SAM decode at a full-res original-image point and
+  // returns a work-resolution Uint8ClampedArray mask (same contract as
+  // regionGrow). SAM's own confidence ranking is not reliable on cluttered
+  // real photos -- verified against a real room photo: the correct single-
+  // object mask was consistently NOT the top-scored of the 3 candidates
+  // (sometimes a near-empty dot scored highest, sometimes an over-broad
+  // multi-object blob did). The median-area candidate matched the correct
+  // object both times, so that's the default; cycleIndex lets the caller
+  // override it (see getSegmentationMask's same-spot-re-click handling).
+  async function samDecodeAt(origX, origY, cycleIndex){
+    const { Tensor } = await getSamLib();
+    const reshaped = samImageInputs.reshaped_input_sizes[0];
+    const origSize = samImageInputs.original_sizes[0]; // [h, w]
+    const points_reshaped = [[ origX / origSize[1] * reshaped[1], origY / origSize[0] * reshaped[0] ]];
+    const input_points = new Tensor('float32', points_reshaped.flat(), [1, 1, 1, 2]);
+    const input_labels = new Tensor('int64', new BigInt64Array([1n]), [1, 1, 1]);
+    const outputs = await samModel({ ...samImageEmbeddings, input_points, input_labels });
+    const masksTensor = await samProcessor.post_process_masks(outputs.pred_masks, samImageInputs.original_sizes, samImageInputs.reshaped_input_sizes);
+    const dims = masksTensor[0].dims;
+    const fh = dims[dims.length-2], fw = dims[dims.length-1];
+    const stride = fh*fw;
+    const data = masksTensor[0].data;
+
+    const areas = [0,1,2].map(mi=>{
+      let c=0; for(let i=0;i<stride;i++) if(data[mi*stride+i]) c++;
+      return c;
+    });
+    const order = [0,1,2].slice().sort((a,b)=>areas[a]-areas[b]); // small -> large
+    const chosenIdx = (cycleIndex!=null) ? cycleIndex : order[1];
+
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = fw; fullCanvas.height = fh;
+    const fullCtx = fullCanvas.getContext('2d');
+    const fullImg = fullCtx.createImageData(fw,fh);
+    for(let i=0;i<stride;i++){
+      const v = data[chosenIdx*stride+i] ? 255 : 0;
+      fullImg.data[i*4]=v; fullImg.data[i*4+1]=v; fullImg.data[i*4+2]=v; fullImg.data[i*4+3]=255;
+    }
+    fullCtx.putImageData(fullImg,0,0);
+
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = workW; tmpCanvas.height = workH;
+    const tctx = tmpCanvas.getContext('2d');
+    tctx.drawImage(fullCanvas, 0, 0, workW, workH);
+    const scaled = tctx.getImageData(0,0,workW,workH).data;
+    const out = new Uint8ClampedArray(workW*workH);
+    for(let i=0;i<workW*workH;i++) out[i] = scaled[i*4] > 127 ? 255 : 0;
+
+    return { mask: out, order };
+  }
+
+  const SAM_CYCLE_RADIUS = 14, SAM_CYCLE_MS = 1600;
+
+  // Given a click at work-res (wx,wy), returns a work-res mask -- via SAM if
+  // available and ready, else the regionGrow fallback (always resolves, never
+  // throws). A repeated click within SAM_CYCLE_RADIUS px and SAM_CYCLE_MS ms
+  // of the previous one cycles through SAM's other 2 candidates instead of
+  // being treated as a fresh independent point.
+  async function getSegmentationMask(wx, wy){
+    if(samAvailable === null) await initSam();
+    if(!samAvailable) return regionGrow(wx, wy);
+    const embedded = await ensureSamEmbeddings();
+    if(!embedded) return regionGrow(wx, wy);
+
+    const now = performance.now();
+    let cycleIndex = null;
+    if(samCycleState && Math.hypot(wx-samCycleState.wx, wy-samCycleState.wy)<=SAM_CYCLE_RADIUS && (now-samCycleState.t)<SAM_CYCLE_MS){
+      samCycleState.pos = (samCycleState.pos+1) % 3;
+      cycleIndex = samCycleState.order[samCycleState.pos];
+    }
+
+    const ox = Math.round(wx*scaleWorkToOrig), oy = Math.round(wy*scaleWorkToOrig);
+    stageStatus.textContent = 'Segmenting…';
+    let result;
+    try{
+      result = await samDecodeAt(ox, oy, cycleIndex);
+    }catch(err){
+      console.warn('Smart selection decode failed, using basic selection instead:', err);
+      samAvailable = false;
+      stageStatus.textContent = baseFileName;
+      return regionGrow(wx, wy);
+    }
+    stageStatus.textContent = baseFileName;
+
+    if(cycleIndex==null){
+      samCycleState = { wx, wy, t: now, order: result.order, pos: 1 };
+      if(!localStorage.getItem('pdSamCycleHintShown')){
+        toast('Wrong shape? Tap the same spot again to try another.');
+        try{ localStorage.setItem('pdSamCycleHintShown','1'); }catch(e){}
+      }
+    } else {
+      samCycleState.t = now;
+    }
+    return result.mask;
+  }
+
+  async function eraseObjectAt(x, y){
+    const region = await getSegmentationMask(x, y);
+    return eraseRegionFromPhoto(region);
+  }
+
+  // Erases a given work-res region mask from the base photo via diffusion
+  // inpainting (shared by Invisible-mode single-object taps and the "Erase
+  // Selected from Photo" action, which passes the current cutout selection
+  // instead of running a fresh segmentation).
+  function eraseRegionFromPhoto(region){
     const bbox = bboxOfMask(region, workW, workH, 1);
     if(!bbox) return null;
     const pad = Math.round(Math.max(bbox.w, bbox.h) * 0.6);
@@ -1208,6 +1407,7 @@
     originalCtx.drawImage(cropCanvas, ox, oy, ow, oh);
 
     edgeMag = computeEdgeMagnitude(workRGB, workW, workH);
+    samEmbeddingsDirty = true; // originalCanvas pixels changed -- next SAM click must re-embed first
     pushPhotoHistory(workPatchBefore, origPatchBefore);
     return true;
   }
@@ -1235,10 +1435,12 @@
       mask = entry.mask;
       if(points.length) points.pop();
       pointCountBadge.textContent = points.length + ' point' + (points.length===1?'':'s');
+      if(isolateLocked) setIsolateLocked(false); // the locked selection no longer exists as confirmed
     } else if(entry.type==='photo'){
       applyPatch(workRGB, workW, entry.workPatch);
       originalCtx.putImageData(entry.origPatch.imageData, entry.origPatch.x, entry.origPatch.y);
       edgeMag = computeEdgeMagnitude(workRGB, workW, workH);
+      samEmbeddingsDirty = true;
     }
     undoBtn.disabled = history.length===0;
     renderStage(); renderReview();
@@ -1249,28 +1451,37 @@
     mask = new Uint8ClampedArray(workW*workH);
     points = [];
     pointCountBadge.textContent = '0 points';
+    setIsolateLocked(false); // nothing left to keep locked
     renderStage(); renderReview();
   });
 
+  // Locking a confirmed selection protects it from a stray tap while the user
+  // decides what to do with it (save/copy/insert/erase); "Edit again" undoes
+  // that without touching the selection itself. Deliberately a separate step
+  // from tapping, so the same-spot-re-click SAM refinement trick (see
+  // getSegmentationMask) still works freely right up until the user locks in.
+  function setIsolateLocked(locked){
+    isolateLocked = locked;
+    stageCanvas.classList.toggle('locked', locked);
+    lockedBadge.style.display = locked ? 'inline-flex' : 'none';
+    editAgainBtn.style.display = locked ? 'inline-block' : 'none';
+    const hasSelection = mask && mask.some(v=>v>20);
+    confirmSelectionBtn.style.display = (!locked && hasSelection) ? 'inline-block' : 'none';
+  }
+  confirmSelectionBtn.addEventListener('click', ()=> setIsolateLocked(true));
+  editAgainBtn.addEventListener('click', ()=> setIsolateLocked(false));
+
   // ---------- Mode toggles ----------
-  modeGroup.addEventListener('click', (e)=>{
+  function onModeButtonClick(e){
     const btn = e.target.closest('button[data-mode]');
     if(!btn) return;
     mode = btn.dataset.mode;
-    [...modeGroup.children].forEach(b=>b.classList.toggle('active', b===btn));
-    const isBrush = mode==='brush';
-    brushSizeRow.style.display = isBrush ? 'flex' : 'none';
-    brushModeGroup.style.display = isBrush ? 'flex' : 'none';
-    brushDivider.style.display = isBrush ? 'block' : 'none';
-    stageCanvas.classList.toggle('eraseMode', mode==='remove');
+    [...modeGroup.children, ...toolGroup.children].forEach(b=>b.classList.toggle('active', b===btn));
     stageCanvas.classList.toggle('panMode', mode==='pan');
-  });
-  brushModeGroup.addEventListener('click', (e)=>{
-    const btn = e.target.closest('button[data-brushmode]');
-    if(!btn) return;
-    brushMode = btn.dataset.brushmode;
-    [...brushModeGroup.children].forEach(b=>b.classList.toggle('active', b===btn));
-  });
+    if(mask) renderReview(); // Review's content depends on mode -- refresh immediately, not just on next edit
+  }
+  modeGroup.addEventListener('click', onModeButtonClick);
+  toolGroup.addEventListener('click', onModeButtonClick);
 
   // ---------- Stage rendering ----------
   // Whole photo visible on first open, no scrolling required -- scales down for
@@ -1300,7 +1511,13 @@
     stageCanvas.style.width = Math.round(workW*zoom) + 'px';
     stageCanvas.style.height = Math.round(workH*zoom) + 'px';
   }
-  zoomSlider.addEventListener('input', fitStageCanvas);
+  zoomSlider.addEventListener('input', ()=>{
+    // Assigning canvas.width/height (which fitStageCanvas does) resets the whole
+    // pixel buffer to blank, even when the new value equals the old one -- so the
+    // photo has to be repainted every time the zoom changes, not just resized.
+    fitStageCanvas();
+    renderStage();
+  });
 
   function renderStage(){
     stageCtx.putImageData(workImageData, 0, 0);
@@ -1394,13 +1611,31 @@
     requestAnimationFrame(()=>{
       renderReviewQueued = false;
       scheduleEditorProjectSave();
+
+      if(mode==='invisible'){
+        // Context-appropriate preview: Invisible mode's job is removing an
+        // object from the photo, so show the photo as it currently stands
+        // (reflecting any erases already made) rather than an isolated-object
+        // cutout, which isn't what this mode is doing.
+        reviewCanvas.width = originalCanvas.width; reviewCanvas.height = originalCanvas.height;
+        reviewCtx.clearRect(0,0,reviewCanvas.width,reviewCanvas.height);
+        reviewCtx.drawImage(originalCanvas,0,0);
+        emptyReview.style.display = 'none';
+        reviewCanvas.style.display = 'block';
+        saveBtn.disabled = true; copyBtn.disabled = true; placeBtn.disabled = true; eraseSelectedBtn.disabled = true;
+        confirmSelectionBtn.style.display = 'none'; editAgainBtn.style.display = 'none'; lockedBadge.style.display = 'none';
+        return;
+      }
+
       const hasContent = mask && mask.some(v=>v>20);
+      confirmSelectionBtn.style.display = (!isolateLocked && hasContent) ? 'inline-block' : 'none';
       if(!hasContent){
         emptyReview.style.display='block';
         reviewCanvas.style.display='none';
         saveBtn.disabled = true;
         copyBtn.disabled = true;
         placeBtn.disabled = true;
+        eraseSelectedBtn.disabled = true;
         return;
       }
       const cut = buildFinalCutout();
@@ -1413,6 +1648,7 @@
       saveBtn.disabled = false;
       copyBtn.disabled = false;
       placeBtn.disabled = false;
+      eraseSelectedBtn.disabled = false;
     });
   }
 
@@ -1423,22 +1659,6 @@
     const cy = (e.clientY - rect.top) * (stageCanvas.height/rect.height);
     return { x: clamp(Math.round(cx),0,workW-1), y: clamp(Math.round(cy),0,workH-1) };
   }
-
-  function applyBrush(x, y){
-    const r = parseInt(brushSlider.value,10);
-    const val = brushMode==='add' ? 255 : 0;
-    const r2 = r*r;
-    const minX=clamp(x-r,0,workW-1), maxX=clamp(x+r,0,workW-1);
-    const minY=clamp(y-r,0,workH-1), maxY=clamp(y+r,0,workH-1);
-    for(let yy=minY; yy<=maxY; yy++){
-      for(let xx=minX; xx<=maxX; xx++){
-        const dx=xx-x, dy=yy-y;
-        if(dx*dx+dy*dy<=r2) mask[yy*workW+xx]=val;
-      }
-    }
-  }
-
-  let brushStrokeActive = false;
 
   stageCanvas.addEventListener('pointerdown', (e)=>{
     if(!mask) return;
@@ -1451,41 +1671,41 @@
     }
     const {x,y} = stageCoordsFromEvent(e);
 
-    if(mode==='brush'){
-      pushHistory();
-      brushStrokeActive = true;
-      applyBrush(x,y);
-      renderStage();
-      return;
-    }
-
     if(mode==='invisible'){
+      if(segmentationBusy) return;
       isPointerDown = false;
+      segmentationBusy = true;
       stageStatus.textContent = 'Erasing…';
-      // Yield one frame so the status text actually paints before the
-      // synchronous diffusion fill blocks the main thread.
-      requestAnimationFrame(()=>{ setTimeout(()=>{
-        const ok = eraseObjectAt(x,y);
-        stageStatus.textContent = baseFileName;
-        if(!ok){ toast('Nothing there to erase.'); return; }
-        renderStage();
-        renderReview();
-      }, 0); });
+      (async ()=>{
+        try{
+          const ok = await eraseObjectAt(x,y);
+          stageStatus.textContent = baseFileName;
+          if(!ok){ toast('Nothing there to erase.'); return; }
+          renderStage();
+          renderReview();
+        } finally { segmentationBusy = false; }
+      })();
       return;
     }
 
-    pushHistory();
-    const region = regionGrow(x,y);
     if(mode==='add'){
-      for(let i=0;i<mask.length;i++) if(region[i]) mask[i]=255;
-      points.push({x,y,label:1});
-    } else if(mode==='remove'){
-      for(let i=0;i<mask.length;i++) if(region[i]) mask[i]=0;
-      points.push({x,y,label:0});
+      if(isolateLocked){ toast('Selection is locked — tap "Edit again" to keep refining it.'); return; }
+      if(segmentationBusy) return;
+      isPointerDown = false;
+      segmentationBusy = true;
+      (async ()=>{
+        try{
+          pushHistory();
+          const region = await getSegmentationMask(x,y);
+          for(let i=0;i<mask.length;i++) if(region[i]) mask[i]=255;
+          points.push({x,y,label:1});
+          pointCountBadge.textContent = points.length + ' point' + (points.length===1?'':'s');
+          renderStage();
+          renderReview();
+        } finally { segmentationBusy = false; }
+      })();
+      return;
     }
-    pointCountBadge.textContent = points.length + ' point' + (points.length===1?'':'s');
-    renderStage();
-    renderReview();
   });
 
   stageCanvas.addEventListener('pointermove', (e)=>{
@@ -1495,20 +1715,14 @@
       stageScroll.scrollTop = panStart.st - (e.clientY-panStart.y);
       return;
     }
-    if(mode==='brush' && brushStrokeActive){
-      const {x,y} = stageCoordsFromEvent(e);
-      applyBrush(x,y);
-      renderStage();
-    }
   });
 
   function endPointer(){
-    if(brushStrokeActive){ brushStrokeActive=false; renderReview(); }
     isPointerDown = false; panStart = null;
   }
   stageCanvas.addEventListener('pointerup', endPointer);
   stageCanvas.addEventListener('pointercancel', endPointer);
-  stageCanvas.addEventListener('pointerleave', ()=>{ if(mode!=='brush') endPointer(); });
+  stageCanvas.addEventListener('pointerleave', endPointer);
 
   sensSlider.addEventListener('change', ()=>{ /* affects next click only, no live recompute needed */ });
 
@@ -1687,6 +1901,27 @@
       copyWholeBtn.disabled = false;
       copyWholeBtn.textContent = label;
     }
+  });
+
+  // Takes whatever is currently selected (built via Select/Remove clicks) and
+  // erases it from the photo itself -- the natural next step after Select
+  // accurately identifies an object, distinct from Remove (which only
+  // narrows the selection, never touches the photo).
+  eraseSelectedBtn.addEventListener('click', ()=>{
+    if(!mask || !mask.some(v=>v>20)){ toast('Select an object first.'); return; }
+    eraseSelectedBtn.disabled = true;
+    stageStatus.textContent = 'Erasing…';
+    requestAnimationFrame(()=>{ setTimeout(()=>{
+      const ok = eraseRegionFromPhoto(mask);
+      stageStatus.textContent = baseFileName;
+      if(!ok){ toast('Nothing there to erase.', true); eraseSelectedBtn.disabled = false; return; }
+      mask = new Uint8ClampedArray(workW*workH);
+      points = [];
+      pointCountBadge.textContent = '0 points';
+      renderStage();
+      renderReview();
+      toast('Erased from the photo.');
+    }, 0); });
   });
 
   // ---------- Save-location capability note ----------
@@ -2027,7 +2262,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+ee30004f';
+  const APP_VERSION = '1.0+10c58c87';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -2080,8 +2315,9 @@
       '<li>Tap "Add to Home screen" or "Install app".</li>' +
       '<li>Tap "Install" (or "Add") to confirm.</li></ol><br>' +
     '<strong>Desktop Chrome/Edge:</strong>' +
-    '<ol><li>Click the install icon in the address bar (or &#8942; menu &rarr; "Install PhotoDesigner").</li>' +
-      '<li>Click "Install".</li></ol>';
+    '<ol><li>Look for an install icon in the address bar (small monitor-with-arrow), or check the &#8942; menu for an item named "Install PhotoDesigner…", "Save and share → Install page as app…", or "Apps → Install this site as an app…" (exact wording varies by browser version).</li>' +
+      '<li>Click "Install".</li>' +
+      '<li>If you don\'t see any install option at all: make sure you\'re on the live https:// address (not a local file), then reload and wait a few seconds -- the browser only offers to install once it has decided the site qualifies, which can take a moment.</li></ol>';
   const UNINSTALL_STEPS_HTML =
     '<strong>iPhone/iPad:</strong>' +
     '<ol><li>Touch and hold the icon.</li>' +
