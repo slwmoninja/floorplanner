@@ -223,6 +223,32 @@
     background:var(--panel2); color:var(--danger); cursor:pointer; font-size:.7rem; line-height:1;
   }
 
+  /* ---------- Generate-from-photos modal ---------- */
+  .fp-photo-drop{
+    border:1.5px dashed var(--border); border-radius:10px; padding:1.2rem;
+    text-align:center; color:var(--dim); font-size:.82rem; cursor:pointer;
+  }
+  .fp-photo-drop:hover, .fp-photo-drop.drag{ border-color:var(--accent); color:var(--text); }
+  .fp-photo-thumbs{ display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.6rem; }
+  .fp-photo-thumb{ position:relative; width:64px; height:64px; border-radius:6px; overflow:hidden; border:1px solid var(--border); }
+  .fp-photo-thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .fp-photo-thumb button{
+    position:absolute; top:2px; right:2px; width:16px; height:16px; border-radius:50%;
+    background:rgba(20,22,26,.85); color:#fff; border:none; font-size:.6rem; line-height:1; cursor:pointer;
+  }
+  #fpKnownDims{
+    width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:.5rem .6rem; font-size:.82rem; font-family:inherit; resize:vertical;
+  }
+  .fp-key-row{
+    display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-top:.7rem;
+    padding-top:.7rem; border-top:1px solid var(--border); font-size:.76rem; color:var(--dim);
+  }
+  .fp-key-row input[type=password]{
+    flex:1; min-width:10rem; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:6px; padding:.35rem .5rem; font-size:.78rem;
+  }
+
   .workspace{ display:grid; grid-template-columns:1fr; gap:.9rem; align-items:start; }
 
   .stagePanel{
@@ -415,6 +441,8 @@
   <!-- ============ FLOOR PLAN SCREEN ============ -->
   <section id="floorplanScreen">
     <div class="toolbar fp-toolbar">
+      <button class="btn" id="fpGenerateFromPhotosBtn" title="Generate a floor plan from room photos" style="border-color:var(--accent); color:var(--accent);">&#10024; Generate from photos</button>
+      <div class="divider"></div>
       <button class="btn" id="fpAddFurnitureBtn" title="Add a piece of furniture to the plan">+ Furniture</button>
       <button class="btn" id="fpAddOpeningBtn" title="Add a door or window opening">+ Opening</button>
       <div class="divider"></div>
@@ -2653,7 +2681,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+7bf0d8ad';
+  const APP_VERSION = '1.0+e4a768e6';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -3336,6 +3364,7 @@
       fpState.notes.push('');
       fpSave(); fpRender();
     });
+    document.getElementById('fpGenerateFromPhotosBtn').addEventListener('click', fpOpenGenerateModal);
     document.getElementById('fpUndoBtn').addEventListener('click', fpUndo);
     document.getElementById('fpResetBtn').addEventListener('click', ()=>{
       if(!confirm('Clear this floor plan and start blank?')) return;
@@ -3355,6 +3384,196 @@
         fpSelectedId = null; fpSave(); fpRender();
       }
     });
+  }
+
+  // ---------- Floor Plan: generate from photos (Claude vision API) ----------
+  // Runs entirely client-side: the photo(s) go straight from this browser to
+  // Anthropic's API using a key Russ enters and stores himself (localStorage,
+  // this device only) -- never something typed into chat with Claude Code.
+  const FP_API_KEY_STORAGE = 'floorplanner-anthropic-key';
+  function fpGetApiKey(){ try{ return localStorage.getItem(FP_API_KEY_STORAGE) || ''; }catch(e){ return ''; } }
+  function fpSetApiKey(key){ try{ if(key) localStorage.setItem(FP_API_KEY_STORAGE, key); else localStorage.removeItem(FP_API_KEY_STORAGE); }catch(e){} }
+
+  function fpFileToBase64(file){
+    return new Promise((resolve,reject)=>{
+      const reader = new FileReader();
+      reader.onload = ()=> resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function fpOpenGenerateModal(){
+    const hasKey = !!fpGetApiKey();
+    const wrap = openModal('Generate floor plan from photos', `
+      <p class="fp-hint" style="margin-top:0;">Take 3&ndash;4 photos of the room from different corners, so every wall shows in at least one shot. Include doors, windows, and the furniture you want on the plan.</p>
+      <div class="fp-photo-drop" id="fpPhotoDrop">Tap to choose photos, or drag them here</div>
+      <input type="file" id="fpPhotoInput" accept="image/*" multiple style="display:none;">
+      <div id="fpPhotoThumbs" class="fp-photo-thumbs"></div>
+      <label class="mini" style="display:block; margin-top:.7rem; color:var(--dim);">Known dimensions or notes (optional)
+        <textarea id="fpKnownDims" rows="3" placeholder="e.g. back wall is about 22 feet, ceilings are 9 feet"></textarea>
+      </label>
+      <div style="margin-top:.7rem; display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;">
+        <button class="btn" id="fpGenerateBtn" style="border-color:var(--accent); color:var(--accent);">Generate floor plan</button>
+        <span id="fpGenerateStatus" class="fp-hint" style="margin:0;"></span>
+      </div>
+      <div class="fp-key-row">
+        ${hasKey
+          ? `<span>Anthropic API key is set (this device only).</span><button class="fp-row-remove" id="fpKeyClear" style="width:auto; border-radius:6px; padding:.2rem .5rem;" title="Remove saved key">Clear key</button>`
+          : `<span>Needs your own Anthropic API key &mdash;</span><a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">get one</a><input type="password" id="fpKeyInput" placeholder="sk-ant-..."><button class="btn" id="fpKeySave" style="padding:.3rem .6rem; font-size:.74rem;">Save key</button>`}
+      </div>
+      <p class="fp-hint">Photos and notes go straight from this browser to Anthropic's API with that key &mdash; not through us, not stored anywhere but here.</p>
+    `);
+
+    const picked = [];
+    const drop = wrap.querySelector('#fpPhotoDrop');
+    const input = wrap.querySelector('#fpPhotoInput');
+    const thumbs = wrap.querySelector('#fpPhotoThumbs');
+    function renderThumbs(){
+      thumbs.innerHTML = '';
+      picked.forEach((f,i)=>{
+        const t = document.createElement('div'); t.className='fp-photo-thumb';
+        const img = document.createElement('img'); img.src = URL.createObjectURL(f);
+        const rm = document.createElement('button'); rm.type='button'; rm.textContent='×';
+        rm.addEventListener('click', ()=>{ picked.splice(i,1); renderThumbs(); });
+        t.appendChild(img); t.appendChild(rm); thumbs.appendChild(t);
+      });
+    }
+    drop.addEventListener('click', ()=> input.click());
+    input.addEventListener('change', (e)=>{
+      [...e.target.files].forEach(f=> picked.push(f));
+      input.value = '';
+      renderThumbs();
+    });
+    drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.classList.add('drag'); });
+    drop.addEventListener('dragleave', ()=> drop.classList.remove('drag'));
+    drop.addEventListener('drop', (e)=>{
+      e.preventDefault(); drop.classList.remove('drag');
+      [...(e.dataTransfer.files||[])].filter(f=>f.type.startsWith('image/')).forEach(f=>picked.push(f));
+      renderThumbs();
+    });
+
+    const keySave = wrap.querySelector('#fpKeySave');
+    if(keySave){
+      keySave.addEventListener('click', ()=>{
+        const v = wrap.querySelector('#fpKeyInput').value.trim();
+        if(!v){ toast('Enter a key first.', true); return; }
+        fpSetApiKey(v);
+        wrap.remove();
+        fpOpenGenerateModal();
+      });
+    }
+    const keyClear = wrap.querySelector('#fpKeyClear');
+    if(keyClear){
+      keyClear.addEventListener('click', ()=>{
+        fpSetApiKey('');
+        wrap.remove();
+        fpOpenGenerateModal();
+      });
+    }
+
+    wrap.querySelector('#fpGenerateBtn').addEventListener('click', async ()=>{
+      const status = wrap.querySelector('#fpGenerateStatus');
+      if(!fpGetApiKey()){ status.textContent = 'Save an API key first.'; return; }
+      if(picked.length===0){ status.textContent = 'Choose at least one photo.'; return; }
+      const notes = wrap.querySelector('#fpKnownDims').value.trim();
+      const btn = wrap.querySelector('#fpGenerateBtn');
+      btn.disabled = true; status.textContent = 'Analyzing '+picked.length+' photo'+(picked.length===1?'':'s')+'…';
+      try{
+        const result = await fpAnalyzePhotos(picked, notes);
+        fpPushHistory();
+        fpApplyGeneratedPlan(result);
+        status.textContent = 'Done.';
+        setTimeout(()=> wrap.remove(), 600);
+      }catch(err){
+        console.error(err);
+        status.textContent = 'Failed: ' + (err && err.message ? err.message : 'unknown error');
+      }finally{
+        btn.disabled = false;
+      }
+    });
+  }
+
+  async function fpAnalyzePhotos(files, notes){
+    const images = await Promise.all(files.map(async f=>({
+      type:'image',
+      source:{ type:'base64', media_type: f.type||'image/jpeg', data: await fpFileToBase64(f) },
+    })));
+    const prompt = `You are analyzing photos of a single room to produce an approximate, to-scale floor plan. Treat the room as one simple rectangle unless the photos clearly show otherwise.
+
+Coordinate system: origin (0,0) is the back-left corner as seen facing the "back" wall (whichever wall has the most window/door area, or the first wall you identify). X increases rightward along back/front walls; Y increases going from the back wall toward the front wall. Room is room.w feet wide (X) by room.d feet deep (Y).
+
+Wall openings (doors/windows): "wall" is one of back/right/front/left. "offset" is feet from that wall's starting corner (back wall and front wall measure offset along X from the left; left wall and right wall measure offset along Y from the back). "width" is the opening's width in feet.
+
+Furniture: "cx"/"cy" are the item's CENTER in feet using the same coordinate system as the room. "w"/"d" are the item's footprint in INCHES (width x depth). "rot" is rotation in degrees, 0 = default orientation.
+
+${notes ? 'The user also supplied these known measurements/notes, prefer them over your own visual estimate when they conflict: ' + notes : 'No measurements were supplied -- estimate from standard door/ceiling/furniture sizing and everyday visual proportion.'}
+
+Respond with ONLY a single JSON object, no markdown fences, no commentary, matching exactly this shape:
+{"title": string, "room": {"w": number, "d": number}, "openings": [{"wall": "back"|"right"|"front"|"left", "offset": number, "width": number, "label": string}], "furniture": [{"label": string, "w": number, "d": number, "cx": number, "cy": number, "rot": number}], "notes": [string, ...]}
+
+Include a "notes" entry stating which figures are firm (anchored to a supplied measurement or a standard size like a door width) versus rough visual estimates.`;
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': fpGetApiKey(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 4096,
+        messages: [{ role:'user', content: [ ...images, { type:'text', text: prompt } ] }],
+      }),
+    });
+    if(!resp.ok){
+      const errBody = await resp.text().catch(()=>'');
+      throw new Error('API error ' + resp.status + (errBody ? ': ' + errBody.slice(0,200) : ''));
+    }
+    const data = await resp.json();
+    const text = (data.content||[]).map(b=>b.text||'').join('').trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if(!jsonMatch) throw new Error('Could not find JSON in the response.');
+    return JSON.parse(jsonMatch[0]);
+  }
+
+  function fpApplyGeneratedPlan(result){
+    const room = result.room || {};
+    fpState = {
+      title: typeof result.title==='string' && result.title.trim() ? result.title.trim() : 'Generated Floor Plan',
+      room: {
+        w: (typeof room.w==='number' && room.w>1) ? room.w : 20,
+        d: (typeof room.d==='number' && room.d>1) ? room.d : 16,
+      },
+      openings: (Array.isArray(result.openings)?result.openings:[]).map(op=>({
+        id: fpIdSeq++,
+        wall: ['back','right','front','left'].includes(op.wall) ? op.wall : 'back',
+        offset: Number(op.offset)||0,
+        width: Math.max(0.5, Number(op.width)||3),
+        label: String(op.label||'Opening'),
+      })),
+      furniture: (Array.isArray(result.furniture)?result.furniture:[]).map(f=>({
+        id: fpIdSeq++,
+        label: String(f.label||'Item'),
+        w: Math.max(4, Number(f.w)||24),
+        d: Math.max(4, Number(f.d)||24),
+        cx: Number(f.cx)||0,
+        cy: Number(f.cy)||0,
+        rot: Number(f.rot)||0,
+      })),
+      legend: [
+        { id: fpIdSeq++, color:'#40d0b5', label:'Furniture', desc:'drag to move, top dot to spin' },
+        { id: fpIdSeq++, color:'#2b8f7c', label:'Opening', desc:'door or window in a wall' },
+      ],
+      notes: (Array.isArray(result.notes)?result.notes:[]).map(String),
+    };
+    fpSelectedId = null;
+    document.getElementById('fpTitle').textContent = fpState.title;
+    document.getElementById('fpRoomW').value = fpFmtFeet(fpState.room.w);
+    document.getElementById('fpRoomD').value = fpFmtFeet(fpState.room.d);
+    fpSave(); fpRender();
   }
 
   // ---------- PWA: bootstrap ----------
