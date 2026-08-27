@@ -1,7 +1,7 @@
 {
-  "name": "PhotoDesigner",
-  "short_name": "PhotoDesigner",
-  "description": "Cut, hide and paste objects in photos.",
+  "name": "FloorPlanner",
+  "short_name": "FloorPlanner",
+  "description": "Turn room photos into editable floor plans, and shop real furniture that fits.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

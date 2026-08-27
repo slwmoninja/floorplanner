@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>PhotoDesigner — Cut, hide and paste objects in photos</title>
+<title>FloorPlanner — Room photos to editable floor plans</title>
 <meta name="theme-color" content="#14161a">
 <link rel="manifest" href="./manifest.json">
 <link rel="icon" href="./icon-192.png">
@@ -283,16 +283,16 @@
 
 <header>
   <div class="headerTop">
-    <h1>PhotoDesigner</h1>
+    <h1>FloorPlanner</h1>
     <div class="spacer"></div>
-    <button class="topbar-install-btn" id="installBtn" style="display:none;" title="Install PhotoDesigner on this device">Install</button>
+    <button class="topbar-install-btn" id="installBtn" style="display:none;" title="Install FloorPlanner on this device">Install</button>
     <button class="btn" id="geminiBtn" style="display:inline-flex; align-items:center; justify-content:center;" title="Open Gemini in a new tab — copy a cutout here, edit it there, then bring it back with Insert">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C12 8 16 12 22 12C16 12 12 16 12 22C12 16 8 12 2 12C8 12 12 8 12 2Z"/></svg>
     </button>
-    <button class="btn" id="infoBtn" title="About PhotoDesigner">&#9432;</button>
+    <button class="btn" id="infoBtn" title="About FloorPlanner">&#9432;</button>
     <button class="btn" id="startOverBtn" style="display:none;" title="Discard this photo and start over with a new one">Start over</button>
   </div>
-  <span class="sub">Cut, hide and paste objects in photos</span>
+  <span class="sub">Room photos to editable floor plans — plus cut, hide and paste objects in photos</span>
 </header>
 
 <main>
@@ -630,7 +630,7 @@
   // sprite + its transform). Independent of each other and of the explicit
   // Save/Copy exports -- this is just "don't lose unfinished work if the tab
   // closes," not the user's real backup.
-  const PROJECT_DB_NAME = 'photodesigner-projects', PROJECT_DB_VERSION = 1, PROJECT_STORE = 'projects';
+  const PROJECT_DB_NAME = 'floorplanner-projects', PROJECT_DB_VERSION = 1, PROJECT_STORE = 'projects';
   function openProjectDB(){
     return new Promise((resolve,reject)=>{
       const req = indexedDB.open(PROJECT_DB_NAME, PROJECT_DB_VERSION);
@@ -1948,7 +1948,7 @@
     const w = window.open('', '_blank', 'width=520,height=620');
     if(!w){ toast('Your browser blocked the pop-out window. The Review panel on the right still shows the live result.', true); return; }
     w.document.write(
-      '<!DOCTYPE html><html><head><title>PhotoDesigner — Review</title><style>'+
+      '<!DOCTYPE html><html><head><title>FloorPlanner — Review</title><style>'+
       'body{margin:0;background:#191b1f;display:flex;align-items:center;justify-content:center;min-height:100vh;'+
       'background-image:linear-gradient(45deg,#0e1013 25%,transparent 25%),linear-gradient(-45deg,#0e1013 25%,transparent 25%),'+
       'linear-gradient(45deg,transparent 75%,#0e1013 75%),linear-gradient(-45deg,transparent 75%,#0e1013 75%);'+
@@ -2477,7 +2477,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+821f88fe';
+  const APP_VERSION = '1.0+6e87a74b';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -2508,8 +2508,8 @@
   function isStandaloneApp(){
     return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
   }
-  const INSTALL_FLAG_KEY = 'photodesignerInstallPromptAccepted';
-  const INSTALL_ASKED_KEY = 'photodesignerInstallPromptAsked';
+  const INSTALL_FLAG_KEY = 'floorplannerInstallPromptAccepted';
+  const INSTALL_ASKED_KEY = 'floorplannerInstallPromptAsked';
   function getInstallFlag(){ try{ return localStorage.getItem(INSTALL_FLAG_KEY)==='1'; }catch(e){ return false; } }
   function setInstallFlag(v){ try{ if(v) localStorage.setItem(INSTALL_FLAG_KEY,'1'); else localStorage.removeItem(INSTALL_FLAG_KEY); }catch(e){} }
   // Not just isStandaloneApp() alone -- a regular tab that just walked
@@ -2530,7 +2530,7 @@
       '<li>Tap "Add to Home screen" or "Install app".</li>' +
       '<li>Tap "Install" (or "Add") to confirm.</li></ol><br>' +
     '<strong>Desktop Chrome/Edge:</strong>' +
-    '<ol><li>Look for an install icon in the address bar (small monitor-with-arrow), or check the &#8942; menu for an item named "Install PhotoDesigner…", "Save and share → Install page as app…", or "Apps → Install this site as an app…" (exact wording varies by browser version).</li>' +
+    '<ol><li>Look for an install icon in the address bar (small monitor-with-arrow), or check the &#8942; menu for an item named "Install FloorPlanner…", "Save and share → Install page as app…", or "Apps → Install this site as an app…" (exact wording varies by browser version).</li>' +
       '<li>Click "Install".</li>' +
       '<li>If you don\'t see any install option at all: make sure you\'re on the live https:// address (not a local file), then reload and wait a few seconds -- the browser only offers to install once it has decided the site qualifies, which can take a moment.</li></ol>';
   const UNINSTALL_STEPS_HTML =
@@ -2554,7 +2554,7 @@
   window.addEventListener('beforeinstallprompt', (e)=>{
     e.preventDefault();
     deferredInstallPrompt = e;
-    // Chrome only fires this when it believes PhotoDesigner is NOT currently
+    // Chrome only fires this when it believes FloorPlanner is NOT currently
     // installed for this origin -- the one reliable signal that a stuck-true
     // flag is stale (site storage survives an OS-level Home Screen uninstall,
     // which is what leaves the flag stuck true in the first place).
@@ -2610,7 +2610,7 @@
   });
   infoBtn.addEventListener('click', ()=>{
     const showResetLink = !isStandaloneApp() && getInstallFlag();
-    const wrap = openModal('About PhotoDesigner',
+    const wrap = openModal('About FloorPlanner',
       '<div style="margin-bottom:.6rem;">Isolate objects from photos, erase things with on-device inpainting, and compose cutouts onto other photos. Everything runs on this device — your photo is never uploaded anywhere.</div>' +
       '<div class="about-row"><span class="k">Version</span><span>'+APP_VERSION+'</span></div>' +
       aboutInstallRowHtml() +
@@ -2631,7 +2631,7 @@
     }
   });
 
-  // Proactive "Install PhotoDesigner?" prompt, shown once ever per device,
+  // Proactive "Install FloorPlanner?" prompt, shown once ever per device,
   // ~1.5s after load so beforeinstallprompt (which can arrive a moment after
   // load) has a real chance to populate deferredInstallPrompt first, giving
   // "Install" here the same shot at the fast native one-tap path as the pill.
@@ -2643,7 +2643,7 @@
     setTimeout(()=>{
       if(isInstalled()) return; // could have installed (or been asked elsewhere) during the delay
       try{ localStorage.setItem(INSTALL_ASKED_KEY,'1'); }catch(e){}
-      const wrap = openModal('Install PhotoDesigner?',
+      const wrap = openModal('Install FloorPlanner?',
         '<div style="margin-bottom:.9rem;">Install to get project-saving features.</div>' +
         '<button class="btn-primary" id="installPromptYes">Install</button>' +
         '<button class="btn-secondary" id="installPromptNo">Not now</button>'
@@ -2657,7 +2657,7 @@
   }
 
   // Best-effort ask not to auto-evict this origin's storage under low-disk
-  // pressure. PhotoDesigner keeps no persisted photo/edit data (photos stay
+  // pressure. FloorPlanner keeps no persisted photo/edit data (photos stay
   // in-tab and are exported explicitly via Save As/Copy), so this only
   // protects the handful of install/update bookkeeping keys in
   // localStorage -- low-stakes, but the call is free, so it's still made.
@@ -2668,7 +2668,7 @@
       navigator.storage.persist().then((granted)=>{
         if(!granted && navigator.storage.estimate){
           navigator.storage.estimate().then((est)=>{
-            console.warn('[PhotoDesigner] storage persistence not granted; usage/quota estimate:', est);
+            console.warn('[FloorPlanner] storage persistence not granted; usage/quota estimate:', est);
           }).catch(()=>{});
         }
       }).catch(()=>{});
@@ -2690,7 +2690,7 @@
   // Signal 1: index.html's own etag/last-modified, remembered across
   // sessions so the very first check of a new session can catch "what got
   // served just now is already behind what's on the server."
-  const DEPLOYED_TAG_KEY = 'photodesignerDeployedTag';
+  const DEPLOYED_TAG_KEY = 'floorplannerDeployedTag';
   let deployedVersionTag = (()=>{ try{ return localStorage.getItem(DEPLOYED_TAG_KEY); }catch(e){ return null; } })();
   // Signal 2: forces the service worker's own byte-diff check right now
   // instead of waiting on the browser's lazy schedule (up to ~24h). Once a

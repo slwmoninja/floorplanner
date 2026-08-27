@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keeps PhotoDesigner's PWA install/update machinery honest on every commit.
+"""Keeps FloorPlanner's PWA install/update machinery honest on every commit.
 
 Three independent things this does, all driven by content hashes so nothing
 has to be hand-bumped:
@@ -132,7 +132,7 @@ def sync_cache_name():
     sw_logic = re.sub(r"const CACHE_NAME = '[^']*';", "", sw_text)
     hasher.update(sw_logic.encode("utf-8"))
 
-    new_name = f"photodesigner-shell-{hasher.hexdigest()[:12]}"
+    new_name = f"floorplanner-shell-{hasher.hexdigest()[:12]}"
 
     new_sw_text, count = re.subn(
         r"const CACHE_NAME = '[^']*';",
