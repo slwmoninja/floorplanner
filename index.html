@@ -1876,11 +1876,15 @@
       stageStatus.textContent = 'Analyzing…';
       (async ()=>{
         try{
+          // Union each tap into the pending removal region (same accumulation as
+          // Isolate mode) so a part missed by one tap -- e.g. chair legs separate
+          // from the backrest -- can be picked up with another tap on the same object.
           const region = await getSegmentationMask(x,y);
-          const preview = computeErasePreview(region);
+          if(!removeMask) removeMask = new Uint8ClampedArray(workW*workH);
+          for(let i=0;i<removeMask.length;i++) if(region[i]) removeMask[i]=255;
+          const preview = computeErasePreview(removeMask);
           stageStatus.textContent = baseFileName;
           if(!preview){ toast('Nothing there to erase.'); return; }
-          removeMask = region;
           erasePreview = preview;
           renderStage();
           renderReview();
@@ -2085,13 +2089,15 @@
     }
   });
 
-  // ---------- Save/Copy whole photo (reflects Invisible-mode edits, no mask/trim) ----------
+  // ---------- Save/Copy whole photo -- reads reviewCanvas (what "In Process" is
+  // actually showing right now), not originalCanvas, so a pending Remove/Insert
+  // preview that hasn't been confirmed yet still saves/copies exactly what's on screen. ----------
   saveWholeBtn.addEventListener('click', async ()=>{
     saveWholeBtn.disabled = true;
     const label = saveWholeBtn.textContent;
     saveWholeBtn.textContent = 'Preparing…';
     try{
-      const blob = await canvasToBlob(originalCanvas, 'png');
+      const blob = await canvasToBlob(reviewCanvas, 'png');
       await saveBlobAs(blob, 'png', baseFileName + '-edited', invisibleNote);
     }catch(err){
       console.error(err);
@@ -2106,7 +2112,7 @@
     const label = copyWholeBtn.textContent;
     copyWholeBtn.textContent = 'Copying…';
     try{
-      await copyCanvasToClipboard(originalCanvas, invisibleNote);
+      await copyCanvasToClipboard(reviewCanvas, invisibleNote);
     }finally{
       copyWholeBtn.disabled = false;
       copyWholeBtn.textContent = label;
@@ -2471,7 +2477,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+9a26965e';
+  const APP_VERSION = '1.0+821f88fe';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
