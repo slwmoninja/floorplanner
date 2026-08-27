@@ -286,6 +286,9 @@
     <h1>PhotoDesigner</h1>
     <div class="spacer"></div>
     <button class="topbar-install-btn" id="installBtn" style="display:none;" title="Install PhotoDesigner on this device">Install</button>
+    <button class="btn" id="geminiBtn" style="display:inline-flex; align-items:center; justify-content:center;" title="Open Gemini in a new tab — copy a cutout here, edit it there, then bring it back with Insert">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C12 8 16 12 22 12C16 12 12 16 12 22C12 16 8 12 2 12C8 12 12 8 12 2Z"/></svg>
+    </button>
     <button class="btn" id="infoBtn" title="About PhotoDesigner">&#9432;</button>
     <button class="btn" id="startOverBtn" style="display:none;" title="Discard this photo and start over with a new one">Start over</button>
   </div>
@@ -315,18 +318,25 @@
     <div class="toolbar">
       <span class="mini" style="font-weight:700; color:var(--text);">Object:</span>
       <div class="segGroup" id="modeGroup">
-        <button class="btn active" data-mode="add" title="Tap the object you want to isolate">Isolate</button>
+        <button class="btn" data-mode="add" title="Tap the object you want to isolate">Isolate</button>
         <button class="btn" data-mode="invisible" title="Tap an object to remove it from the photo, filled in with the surrounding background">Remove</button>
-        <button class="btn" id="insertModeBtn" title="Bring a saved cutout into this photo">Insert</button>
+        <button class="btn active" id="insertModeBtn" data-mode="insert" title="Bring a copied or saved cutout into this photo">Insert</button>
       </div>
       <input type="file" id="insertFileInput" accept="image/*" style="display:none;">
 
-      <div class="divider"></div>
+      <span id="sensGroup" style="display:none; align-items:center; gap:.6rem;">
+        <div class="divider"></div>
+        <label class="mini" title="How far the selection grows from where you tap">Sensitivity
+          <input type="range" id="sensSlider" class="wedge" min="5" max="70" value="26">
+        </label>
+      </span>
 
-      <label class="mini" title="How far the selection grows from where you tap">Sensitivity
-        <input type="range" id="sensSlider" class="wedge" min="5" max="70" value="26">
-      </label>
-
+      <span id="insertGroup" style="display:flex; align-items:center; gap:.6rem;">
+        <div class="divider"></div>
+        <label class="mini" title="Resize the inserted image">Size
+          <input type="range" id="insertScaleSlider" min="10" max="300" value="100">
+        </label>
+      </span>
 
       <div class="divider"></div>
       <button class="btn" id="undoBtn" disabled title="Undo the last edit">Undo</button>
@@ -334,15 +344,9 @@
       <button class="btn" id="confirmSelectionBtn" style="display:none;" title="Lock in this selection so a stray tap can't change it">Looks good</button>
       <button class="btn" id="editAgainBtn" style="display:none;" title="Unlock the selection to keep tapping/refining it">Edit again</button>
 
-      <div class="divider"></div>
-      <button class="btn" id="saveWholeBtn" disabled title="Save the whole photo as a file, including any Invisible-mode edits">Save whole photo…</button>
-      <button class="btn" id="copyWholeBtn" disabled title="Copy the whole photo to your clipboard, including any Invisible-mode edits">Copy whole photo</button>
-
       <div class="spacer"></div>
       <span class="badge" id="samStatusBadge" title="Smart select uses an on-device object-recognition model, downloaded once and cached"></span>
-      <span class="badge" id="pointCountBadge">0 points</span>
     </div>
-    <div class="saveNote" id="invisibleNote" style="margin-bottom:.6rem;"></div>
 
     <div class="workspace">
       <div class="stagePanel">
@@ -369,28 +373,35 @@
           </div>
 
           <div class="savePanel">
-            <div class="saveRow">
-              <select id="formatSelect">
-                <option value="png">PNG (transparent)</option>
-                <option value="webp">WEBP (transparent)</option>
-                <option value="jpeg">JPEG (solid background)</option>
-              </select>
-              <input type="color" id="bgColor" value="#ffffff" style="display:none;">
+            <div id="cutoutSaveControls" style="display:flex; flex-direction:column; gap:.5rem; width:100%;">
+              <div class="saveRow">
+                <select id="formatSelect">
+                  <option value="png">PNG (transparent)</option>
+                  <option value="webp">WEBP (transparent)</option>
+                  <option value="jpeg">JPEG (solid background)</option>
+                </select>
+                <input type="color" id="bgColor" value="#ffffff" style="display:none;">
+              </div>
+              <label class="mini" style="justify-content:space-between; width:100%;">
+                <span>Trim to object</span>
+                <input type="checkbox" id="trimToggle" checked style="accent-color:var(--accent);">
+              </label>
+              <div class="saveRow">
+                <input type="text" id="filenameInput" placeholder="filename">
+              </div>
+              <button class="btn" id="saveBtn" disabled title="Save the isolated cutout as a file">Save</button>
+              <button class="btn" id="copyBtn" disabled title="Copy the cutout to your clipboard, to paste into another photo or document">Copy</button>
+              <div class="saveNote" id="saveNote"></div>
+              <div class="saveNote" id="copyNote"></div>
+              <button class="btn" id="placeBtn" disabled title="Load a background photo and drop this cutout onto it">Place onto another photo</button>
+              <input type="file" id="placeFileInput" accept="image/*" style="display:none;">
+              <button class="btn" id="eraseSelectedBtn" disabled title="Erase the selected object from the photo itself, filled in with the surrounding background">Erase Selected from Photo</button>
             </div>
-            <label class="mini" style="justify-content:space-between; width:100%;">
-              <span>Trim to object</span>
-              <input type="checkbox" id="trimToggle" checked style="accent-color:var(--accent);">
-            </label>
-            <div class="saveRow">
-              <input type="text" id="filenameInput" placeholder="filename">
+            <div id="wholePhotoSaveControls" style="display:none; flex-direction:column; gap:.5rem; width:100%;">
+              <button class="btn" id="saveWholeBtn" title="Save the whole photo as a file">Save</button>
+              <button class="btn" id="copyWholeBtn" title="Copy the whole photo to your clipboard">Copy</button>
+              <div class="saveNote" id="invisibleNote"></div>
             </div>
-            <button class="btn" id="saveBtn" disabled title="Save the isolated cutout as a file">Save As…</button>
-            <button class="btn" id="copyBtn" disabled title="Copy the cutout to your clipboard, to paste into another photo or document">Copy</button>
-            <div class="saveNote" id="saveNote"></div>
-            <div class="saveNote" id="copyNote"></div>
-            <button class="btn" id="placeBtn" disabled title="Load a background photo and drop this cutout onto it">Place onto another photo</button>
-            <input type="file" id="placeFileInput" accept="image/*" style="display:none;">
-            <button class="btn" id="eraseSelectedBtn" disabled title="Erase the selected object from the photo itself, filled in with the surrounding background">Erase Selected from Photo</button>
           </div>
         </div>
       </div>
@@ -485,15 +496,20 @@
 
   const modeGroup = document.getElementById('modeGroup');
   const sensSlider = document.getElementById('sensSlider');
+  const sensGroup = document.getElementById('sensGroup');
+  const insertGroup = document.getElementById('insertGroup');
+  const insertScaleSlider = document.getElementById('insertScaleSlider');
+  const insertFileInput = document.getElementById('insertFileInput');
   const undoBtn = document.getElementById('undoBtn');
   const clearMaskBtn = document.getElementById('clearMaskBtn');
   const confirmSelectionBtn = document.getElementById('confirmSelectionBtn');
   const editAgainBtn = document.getElementById('editAgainBtn');
   const lockedBadge = document.getElementById('lockedBadge');
-  const pointCountBadge = document.getElementById('pointCountBadge');
   const saveWholeBtn = document.getElementById('saveWholeBtn');
   const copyWholeBtn = document.getElementById('copyWholeBtn');
   const invisibleNote = document.getElementById('invisibleNote');
+  const cutoutSaveControls = document.getElementById('cutoutSaveControls');
+  const wholePhotoSaveControls = document.getElementById('wholePhotoSaveControls');
   const eraseSelectedBtn = document.getElementById('eraseSelectedBtn');
 
   const formatSelect = document.getElementById('formatSelect');
@@ -505,6 +521,7 @@
   const copyBtn = document.getElementById('copyBtn');
   const copyNote = document.getElementById('copyNote');
   const installBtn = document.getElementById('installBtn');
+  const geminiBtn = document.getElementById('geminiBtn');
   const infoBtn = document.getElementById('infoBtn');
 
   // ---------- Screen navigation: back gesture goes exactly one screen back ----------
@@ -548,11 +565,14 @@
   let erasePreview = null;                     // Remove mode: { cx0,cy0,cw,ch,cropRGBA } uncommitted inpainted patch
   let baseFileName = 'photo';
 
-  let mode = 'add';          // add | invisible
+  let mode = 'insert';       // add | invisible | insert
   let isolateLocked = false; // true once the current selection is confirmed via "Looks good" -- blocks further taps from changing it until "Edit again"
-  let points = [];           // {x,y,label} in work coords, for badge/undo bookkeeping
+  let points = [];           // {x,y,label} in work coords, for undo bookkeeping
   let history = [];          // stack of Uint8ClampedArray mask snapshots
   const HISTORY_CAP = 25;
+
+  let insertOverlay = null;  // Insert mode: { bitmap, x, y, w, h } pending placement in work coords, uncommitted
+  let insertDrag = null;     // Insert mode: { startX, startY, ox, oy } while dragging the overlay
 
   let isPointerDown = false;
   let segmentationBusy = false; // guards against overlapping async click-to-select requests
@@ -741,7 +761,6 @@
 
     resetEditorState();
     points = (proj.points||[]).slice();
-    pointCountBadge.textContent = points.length + ' point' + (points.length===1?'':'s');
     navigateTo('editor');
 
     fitStageCanvas();
@@ -846,11 +865,20 @@
   });
 
   // ---------- Image loading ----------
+  function resetModeUI(){
+    mode = 'insert';
+    [...modeGroup.children].forEach(b=>b.classList.toggle('active', b.dataset.mode===mode));
+    sensGroup.style.display = 'none';
+    insertGroup.style.display = 'flex';
+    confirmSelectionBtn.textContent = 'Insert';
+    confirmSelectionBtn.title = 'Flatten the inserted image into this photo, permanently';
+  }
   function resetEditorState(){
     points = []; history = [];
     removeMask = null; erasePreview = null;
+    insertOverlay = null; insertDrag = null;
+    resetModeUI();
     undoBtn.disabled = true;
-    pointCountBadge.textContent = '0 points';
     emptyReview.style.display = 'block';
     reviewCanvas.style.display = 'none';
     saveBtn.disabled = true;
@@ -1447,7 +1475,6 @@
     if(entry.type==='mask'){
       mask = entry.mask;
       if(points.length) points.pop();
-      pointCountBadge.textContent = points.length + ' point' + (points.length===1?'':'s');
       if(isolateLocked) setIsolateLocked(false); // the locked selection no longer exists as confirmed
     } else if(entry.type==='photo'){
       applyPatch(workRGB, workW, entry.workPatch);
@@ -1465,11 +1492,15 @@
       renderStage(); renderReview();
       return;
     }
+    if(mode==='insert'){
+      insertOverlay = null; insertDrag = null;
+      renderStage(); renderReview();
+      return;
+    }
     if(!mask) return;
     pushHistory();
     mask = new Uint8ClampedArray(workW*workH);
     points = [];
-    pointCountBadge.textContent = '0 points';
     setIsolateLocked(false); // nothing left to keep locked
     renderStage(); renderReview();
   });
@@ -1497,6 +1528,14 @@
       renderStage(); renderReview();
       return;
     }
+    if(mode==='insert'){
+      if(!insertOverlay) return;
+      commitInsertOverlay();
+      insertOverlay = null; insertDrag = null;
+      toast('Inserted.');
+      renderStage(); renderReview();
+      return;
+    }
     setIsolateLocked(true);
   });
   editAgainBtn.addEventListener('click', ()=> setIsolateLocked(false));
@@ -1507,14 +1546,107 @@
     if(!btn) return;
     mode = btn.dataset.mode;
     [...modeGroup.children].forEach(b=>b.classList.toggle('active', b===btn));
-    confirmSelectionBtn.textContent = mode==='invisible' ? 'Remove object' : 'Looks good';
+    sensGroup.style.display = (mode==='add' || mode==='invisible') ? 'flex' : 'none';
+    insertGroup.style.display = (mode==='insert') ? 'flex' : 'none';
+    confirmSelectionBtn.textContent = mode==='invisible' ? 'Remove object' : mode==='insert' ? 'Insert' : 'Looks good';
     confirmSelectionBtn.title = mode==='invisible'
       ? 'Fill in the background where this object is, permanently'
+      : mode==='insert' ? 'Flatten the inserted image into this photo, permanently'
       : 'Lock in this selection so a stray tap can\'t change it';
+    if(mode==='insert' && !insertOverlay) insertFileInput.click();
     renderStage();
     renderReview(); // Review's content depends on mode -- refresh immediately, not just on next edit
   }
   modeGroup.addEventListener('click', onModeButtonClick);
+
+  // ---------- Insert mode: bring an external image onto the current photo ----------
+  // Mirrors the Isolate/Remove preview-commit pattern: the picked image sits as
+  // an uncommitted, draggable/resizable overlay until the user taps "Insert" to
+  // flatten it into the real photo (or "Clear selection" to discard it).
+  function placeInsertOverlay(bitmap){
+    const maxW = workW * 0.5, maxH = workH * 0.5;
+    const fit = Math.min(1, maxW / bitmap.width, maxH / bitmap.height);
+    const w = Math.max(1, Math.round(bitmap.width * fit));
+    const h = Math.max(1, Math.round(bitmap.height * fit));
+    insertOverlay = {
+      bitmap, naturalW: bitmap.width, naturalH: bitmap.height,
+      x: Math.round((workW - w) / 2), y: Math.round((workH - h) / 2),
+      w, h
+    };
+    insertScaleSlider.value = Math.round(fit * 100);
+    renderStage(); renderReview();
+  }
+  insertFileInput.addEventListener('change', async (e)=>{
+    const f = e.target.files && e.target.files[0];
+    insertFileInput.value = '';
+    if(!f) return;
+    try{ placeInsertOverlay(await createImageBitmap(f)); }
+    catch(err){ toast('Could not read that as an image.', true); }
+  });
+  window.addEventListener('paste', async (e)=>{
+    if(mode!=='insert' || editorScreen.style.display==='none') return;
+    const items = e.clipboardData && e.clipboardData.items;
+    if(!items) return;
+    for(const it of items){
+      if(it.type && it.type.startsWith('image/')){
+        const f = it.getAsFile();
+        if(f){
+          try{ placeInsertOverlay(await createImageBitmap(f)); }
+          catch(err){ toast('Could not read that as an image.', true); }
+          return;
+        }
+      }
+    }
+  });
+  insertScaleSlider.addEventListener('input', ()=>{
+    if(!insertOverlay) return;
+    const scale = parseInt(insertScaleSlider.value,10)/100;
+    const cx = insertOverlay.x + insertOverlay.w/2, cy = insertOverlay.y + insertOverlay.h/2;
+    insertOverlay.w = Math.max(1, Math.round(insertOverlay.naturalW * scale));
+    insertOverlay.h = Math.max(1, Math.round(insertOverlay.naturalH * scale));
+    insertOverlay.x = Math.round(cx - insertOverlay.w/2);
+    insertOverlay.y = Math.round(cy - insertOverlay.h/2);
+    renderStage(); renderReview();
+  });
+  function insertOverlayHit(x, y){
+    if(!insertOverlay) return false;
+    return x >= insertOverlay.x && x <= insertOverlay.x+insertOverlay.w &&
+           y >= insertOverlay.y && y <= insertOverlay.y+insertOverlay.h;
+  }
+  function commitInsertOverlay(){
+    const { bitmap, x, y, w, h } = insertOverlay;
+    const workPatchBefore = extractPatch(workRGB, workW, x, y, w, h);
+
+    // Inserted images (e.g. an isolated cutout) often carry transparent edges --
+    // alpha-blend over the existing pixels rather than overwriting outright,
+    // same as the erase preview's blend of its inpainted patch.
+    const patchCanvas = document.createElement('canvas');
+    patchCanvas.width = w; patchCanvas.height = h;
+    const patchCtx = patchCanvas.getContext('2d');
+    patchCtx.drawImage(bitmap, 0, 0, w, h);
+    const srcData = patchCtx.getImageData(0,0,w,h).data;
+    const blended = new Uint8ClampedArray(w*h*4);
+    for(let i=0;i<w*h;i++){
+      const p = i*4, a = srcData[p+3]/255;
+      blended[p]   = srcData[p]  *a + workPatchBefore.data[p]  *(1-a);
+      blended[p+1] = srcData[p+1]*a + workPatchBefore.data[p+1]*(1-a);
+      blended[p+2] = srcData[p+2]*a + workPatchBefore.data[p+2]*(1-a);
+      blended[p+3] = 255;
+    }
+    applyPatch(workRGB, workW, { x, y, w, h, data: blended });
+
+    const sx = originalCanvas.width/workW, sy = originalCanvas.height/workH;
+    const ox = Math.round(x*sx), oy = Math.round(y*sy);
+    const ow = Math.max(1, Math.round(w*sx)), oh = Math.max(1, Math.round(h*sy));
+    const origPatchBefore = { x: ox, y: oy, imageData: originalCtx.getImageData(ox, oy, ow, oh) };
+    // Canvas 2D compositing (source-over) alpha-blends the bitmap over the
+    // existing pixels correctly on its own, no manual blend needed here.
+    originalCtx.drawImage(bitmap, ox, oy, ow, oh);
+
+    edgeMag = computeEdgeMagnitude(workRGB, workW, workH);
+    samEmbeddingsDirty = true;
+    pushPhotoHistory(workPatchBefore, origPatchBefore);
+  }
 
   // ---------- Stage rendering ----------
   // Whole photo visible on first open, no scrolling required -- scales down for
@@ -1555,6 +1687,14 @@
         }
       }
       stageCtx.putImageData(overlay,0,0);
+    }
+    if(mode==='insert' && insertOverlay){
+      stageCtx.drawImage(insertOverlay.bitmap, insertOverlay.x, insertOverlay.y, insertOverlay.w, insertOverlay.h);
+      stageCtx.strokeStyle = '#40d0b5';
+      stageCtx.lineWidth = Math.max(1, Math.round(workW/300));
+      stageCtx.setLineDash([8,6]);
+      stageCtx.strokeRect(insertOverlay.x, insertOverlay.y, insertOverlay.w, insertOverlay.h);
+      stageCtx.setLineDash([]);
     }
   }
 
@@ -1633,6 +1773,32 @@
       renderReviewQueued = false;
       scheduleEditorProjectSave();
 
+      cutoutSaveControls.style.display = mode==='add' ? 'flex' : 'none';
+      wholePhotoSaveControls.style.display = mode==='add' ? 'none' : 'flex';
+
+      if(mode==='insert'){
+        // "In Process" preview: composite the pending (uncommitted) inserted
+        // image over the current photo at its dragged/scaled position.
+        reviewCanvas.width = originalCanvas.width; reviewCanvas.height = originalCanvas.height;
+        reviewCtx.clearRect(0,0,reviewCanvas.width,reviewCanvas.height);
+        reviewCtx.drawImage(originalCanvas,0,0);
+        if(insertOverlay){
+          const sx = originalCanvas.width/workW, sy = originalCanvas.height/workH;
+          reviewCtx.drawImage(insertOverlay.bitmap,
+            Math.round(insertOverlay.x*sx), Math.round(insertOverlay.y*sy),
+            Math.max(1,Math.round(insertOverlay.w*sx)), Math.max(1,Math.round(insertOverlay.h*sy)));
+          emptyReview.style.display = 'none';
+          reviewCanvas.style.display = 'block';
+        } else {
+          emptyReview.textContent = 'Choose or paste an image — drag it into place on the left, then tap "Insert".';
+          emptyReview.style.display = 'block';
+          reviewCanvas.style.display = 'none';
+        }
+        saveBtn.disabled = true; copyBtn.disabled = true; placeBtn.disabled = true; eraseSelectedBtn.disabled = true;
+        confirmSelectionBtn.style.display = insertOverlay ? 'inline-block' : 'none';
+        editAgainBtn.style.display = 'none'; lockedBadge.style.display = 'none';
+        return;
+      }
       if(mode==='invisible'){
         // "In Process" preview: composite the pending (uncommitted) erase patch
         // over the current photo so the user can judge the result before it's
@@ -1734,17 +1900,35 @@
           const region = await getSegmentationMask(x,y);
           for(let i=0;i<mask.length;i++) if(region[i]) mask[i]=255;
           points.push({x,y,label:1});
-          pointCountBadge.textContent = points.length + ' point' + (points.length===1?'':'s');
           renderStage();
           renderReview();
         } finally { segmentationBusy = false; }
       })();
       return;
     }
+
+    if(mode==='insert'){
+      if(!insertOverlay){ isPointerDown = false; insertFileInput.click(); return; }
+      if(insertOverlayHit(x,y)){
+        insertDrag = { startX:x, startY:y, ox:insertOverlay.x, oy:insertOverlay.y };
+      } else {
+        isPointerDown = false;
+      }
+      return;
+    }
+  });
+
+  stageCanvas.addEventListener('pointermove', (e)=>{
+    if(!isPointerDown || mode!=='insert' || !insertDrag || !insertOverlay) return;
+    const {x,y} = stageCoordsFromEvent(e);
+    insertOverlay.x = clamp(insertDrag.ox + (x-insertDrag.startX), -insertOverlay.w+10, workW-10);
+    insertOverlay.y = clamp(insertDrag.oy + (y-insertDrag.startY), -insertOverlay.h+10, workH-10);
+    renderStage();
   });
 
   function endPointer(){
     isPointerDown = false;
+    if(insertDrag){ insertDrag = null; renderReview(); }
   }
   stageCanvas.addEventListener('pointerup', endPointer);
   stageCanvas.addEventListener('pointercancel', endPointer);
@@ -1943,7 +2127,6 @@
       if(!ok){ toast('Nothing there to erase.', true); eraseSelectedBtn.disabled = false; return; }
       mask = new Uint8ClampedArray(workW*workH);
       points = [];
-      pointCountBadge.textContent = '0 points';
       renderStage();
       renderReview();
       toast('Erased from the photo.');
@@ -2288,7 +2471,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+e063b158';
+  const APP_VERSION = '1.0+9a26965e';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -2416,6 +2599,9 @@
     }
     return '<button class="topbar-install-btn" id="aboutInstallBtn" style="width:100%;margin-top:.6rem;">Install</button>';
   }
+  geminiBtn.addEventListener('click', ()=>{
+    window.open('https://gemini.google.com/', '_blank', 'noopener');
+  });
   infoBtn.addEventListener('click', ()=>{
     const showResetLink = !isStandaloneApp() && getInstallFlag();
     const wrap = openModal('About PhotoDesigner',
