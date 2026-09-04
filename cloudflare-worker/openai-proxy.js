@@ -15,7 +15,7 @@
 // other site can use this proxy with your key, set ALLOWED_ORIGIN below to
 // your FloorPlanner GitHub Pages URL instead of "*".
 
-const ALLOWED_ORIGIN = '*'; // tighten to e.g. 'https://slwmoninja.github.io' once deployed, if desired
+const ALLOWED_ORIGIN = 'https://slwmoninja.github.io'; // FloorPlanner's actual GitHub Pages origin
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
