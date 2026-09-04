@@ -2698,7 +2698,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+bd691907';
+  const APP_VERSION = '1.0+8470ccc8';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -3489,6 +3489,39 @@
     });
   }
 
+  // Downscale + re-encode as JPEG before sending to either provider -- phone
+  // photos can be several MB each, and neither provider needs more than
+  // ~1568px on the long edge for room/furniture recognition (Anthropic
+  // downscales server-side above that anyway, so sending less doesn't cost
+  // accuracy, just less upload data and fewer image tokens billed).
+  const FP_IMAGE_MAX_DIM = 1568;
+  const FP_IMAGE_QUALITY = 0.82;
+  function fpDownscaleImage(file){
+    return new Promise((resolve, reject)=>{
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = ()=>{
+        URL.revokeObjectURL(url);
+        const scale = Math.min(1, FP_IMAGE_MAX_DIM / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(blob=>{
+          if(blob) resolve(blob); else reject(new Error('Could not encode photo.'));
+        }, 'image/jpeg', FP_IMAGE_QUALITY);
+      };
+      img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('Could not load photo.')); };
+      img.src = url;
+    });
+  }
+  async function fpFileToDownscaledBase64(file){
+    const blob = await fpDownscaleImage(file);
+    return fpFileToBase64(blob);
+  }
+
   function fpKeyRowHtml(provider){
     if(provider === 'openai'){
       const hasKey = !!fpGetOpenAiKey();
@@ -3662,7 +3695,7 @@ Include a "notes" entry stating which figures are firm (anchored to a supplied m
   async function fpAnalyzePhotosAnthropic(files, notes){
     const images = await Promise.all(files.map(async f=>({
       type:'image',
-      source:{ type:'base64', media_type: f.type||'image/jpeg', data: await fpFileToBase64(f) },
+      source:{ type:'base64', media_type:'image/jpeg', data: await fpFileToDownscaledBase64(f) },
     })));
     const prompt = fpAnalyzePrompt(notes, files.length>0);
 
@@ -3694,7 +3727,7 @@ Include a "notes" entry stating which figures are firm (anchored to a supplied m
     if(!proxyUrl) throw new Error('Set your proxy Worker URL first (see cloudflare-worker/README.md).');
     const images = await Promise.all(files.map(async f=>({
       type:'image_url',
-      image_url:{ url: `data:${f.type||'image/jpeg'};base64,${await fpFileToBase64(f)}` },
+      image_url:{ url: `data:image/jpeg;base64,${await fpFileToDownscaledBase64(f)}` },
     })));
     const prompt = fpAnalyzePrompt(notes, files.length>0);
 
