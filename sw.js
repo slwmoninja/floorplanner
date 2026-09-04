@@ -17,7 +17,7 @@
 // stamps manifest.json's icon src URLs (and index.html's apple-touch-icon
 // href) with a content hash whenever the icon files change, so a real icon
 // update always gets a new URL for this check to notice.
-const CACHE_NAME = 'floorplanner-shell-e5993a1f0140';
+const CACHE_NAME = 'floorplanner-shell-b849d9148030';
 const PRECACHE_URLS = [
   './index.html', './manifest.json', './icon-192.png', './icon-512.png'
 ];

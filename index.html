@@ -196,6 +196,12 @@
   .fp-item.selected .fp-del-btn{ display:flex; }
 
   .fp-hint{ margin:.6rem 0 0; font-size:.74rem; color:var(--dim); }
+  .fp-edit-bar{ display:flex; gap:.5rem; margin-top:.8rem; }
+  .fp-edit-bar input{
+    flex:1; min-width:0; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:.5rem .7rem; font-size:.82rem;
+  }
+  .fp-edit-bar input:focus{ outline:none; border-color:var(--accent); }
 
   .fp-side{ display:flex; flex-direction:column; gap:.7rem; }
   .fp-panel{
@@ -441,7 +447,7 @@
   <!-- ============ FLOOR PLAN SCREEN ============ -->
   <section id="floorplanScreen">
     <div class="toolbar fp-toolbar">
-      <button class="btn" id="fpGenerateFromPhotosBtn" title="Generate a floor plan from room photos" style="border-color:var(--accent); color:var(--accent);">&#10024; Generate from photos</button>
+      <button class="btn" id="fpGenerateFromPhotosBtn" title="Generate a floor plan from room photos or dimensions" style="border-color:var(--accent); color:var(--accent);">&#10024; Generate floor plan</button>
       <div class="divider"></div>
       <button class="btn" id="fpAddFurnitureBtn" title="Add a piece of furniture to the plan">+ Furniture</button>
       <button class="btn" id="fpAddOpeningBtn" title="Add a door or window opening">+ Opening</button>
@@ -460,6 +466,12 @@
           <div class="fp-canvas" id="fpCanvas"></div>
         </div>
         <p class="fp-hint">Drag a piece to move it &middot; drag the top dot to spin it &middot; tap it to select, then use the &times; to delete. Tap any dimension or label to edit it.</p>
+
+        <div class="fp-edit-bar">
+          <input type="text" id="fpEditInstruction" placeholder="Describe a change &mdash; &quot;move the sofa to the back wall&quot;, &quot;add a window on the left&quot;, &quot;make the room 2 feet wider&quot;&hellip;">
+          <button class="btn" id="fpEditApplyBtn" style="border-color:var(--accent); color:var(--accent);">Apply</button>
+        </div>
+        <p class="fp-hint" id="fpEditStatus"></p>
       </div>
 
       <aside class="fp-side">
@@ -2681,7 +2693,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+e4a768e6';
+  const APP_VERSION = '1.0+eac162eb';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -3365,6 +3377,33 @@
       fpSave(); fpRender();
     });
     document.getElementById('fpGenerateFromPhotosBtn').addEventListener('click', fpOpenGenerateModal);
+
+    async function runEditInstruction(){
+      const input = document.getElementById('fpEditInstruction');
+      const status = document.getElementById('fpEditStatus');
+      const btn = document.getElementById('fpEditApplyBtn');
+      const instruction = input.value.trim();
+      if(!instruction) return;
+      btn.disabled = true; status.textContent = 'Applying…';
+      try{
+        const result = await fpEditPlanWithText(instruction);
+        fpPushHistory();
+        fpApplyGeneratedPlan(result);
+        input.value = '';
+        status.textContent = 'Done.';
+        setTimeout(()=>{ if(status.textContent==='Done.') status.textContent=''; }, 3000);
+      }catch(err){
+        console.error(err);
+        status.textContent = 'Failed: ' + (err && err.message ? err.message : 'unknown error');
+      }finally{
+        btn.disabled = false;
+      }
+    }
+    document.getElementById('fpEditApplyBtn').addEventListener('click', runEditInstruction);
+    document.getElementById('fpEditInstruction').addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){ e.preventDefault(); runEditInstruction(); }
+    });
+
     document.getElementById('fpUndoBtn').addEventListener('click', fpUndo);
     document.getElementById('fpResetBtn').addEventListener('click', ()=>{
       if(!confirm('Clear this floor plan and start blank?')) return;
@@ -3394,6 +3433,20 @@
   function fpGetApiKey(){ try{ return localStorage.getItem(FP_API_KEY_STORAGE) || ''; }catch(e){ return ''; } }
   function fpSetApiKey(key){ try{ if(key) localStorage.setItem(FP_API_KEY_STORAGE, key); else localStorage.removeItem(FP_API_KEY_STORAGE); }catch(e){} }
 
+  // OpenAI has no CORS support for direct browser calls, so it's reached
+  // through a small proxy Worker you deploy yourself (see
+  // cloudflare-worker/README.md) -- your key still only ever lives here and
+  // in that Worker's memory for a single request, never a third party.
+  const FP_PROVIDER_STORAGE = 'floorplanner-ai-provider';
+  function fpGetProvider(){ try{ return localStorage.getItem(FP_PROVIDER_STORAGE) || 'anthropic'; }catch(e){ return 'anthropic'; } }
+  function fpSetProvider(p){ try{ localStorage.setItem(FP_PROVIDER_STORAGE, p); }catch(e){} }
+  const FP_OPENAI_KEY_STORAGE = 'floorplanner-openai-key';
+  function fpGetOpenAiKey(){ try{ return localStorage.getItem(FP_OPENAI_KEY_STORAGE) || ''; }catch(e){ return ''; } }
+  function fpSetOpenAiKey(key){ try{ if(key) localStorage.setItem(FP_OPENAI_KEY_STORAGE, key); else localStorage.removeItem(FP_OPENAI_KEY_STORAGE); }catch(e){} }
+  const FP_OPENAI_PROXY_STORAGE = 'floorplanner-openai-proxy-url';
+  function fpGetOpenAiProxyUrl(){ try{ return localStorage.getItem(FP_OPENAI_PROXY_STORAGE) || ''; }catch(e){ return ''; } }
+  function fpSetOpenAiProxyUrl(url){ try{ if(url) localStorage.setItem(FP_OPENAI_PROXY_STORAGE, url); else localStorage.removeItem(FP_OPENAI_PROXY_STORAGE); }catch(e){} }
+
   function fpFileToBase64(file){
     return new Promise((resolve,reject)=>{
       const reader = new FileReader();
@@ -3403,27 +3456,61 @@
     });
   }
 
-  function fpOpenGenerateModal(){
+  function fpKeyRowHtml(provider){
+    if(provider === 'openai'){
+      const hasKey = !!fpGetOpenAiKey();
+      const proxyUrl = fpGetOpenAiProxyUrl();
+      return `
+        <label class="mini" style="display:block; color:var(--dim);">Proxy Worker URL (see cloudflare-worker/README.md to deploy your own)
+          <input type="text" id="fpProxyInput" placeholder="https://floorplanner-openai-proxy.your-subdomain.workers.dev" value="${proxyUrl.replace(/"/g,'&quot;')}" style="width:100%;">
+        </label>
+        <div class="fp-key-row" style="margin-top:.4rem;">
+          ${hasKey
+            ? `<span>OpenAI API key is set (this device only).</span><button class="fp-row-remove" id="fpKeyClear" style="width:auto; border-radius:6px; padding:.2rem .5rem;" title="Remove saved key">Clear key</button>`
+            : `<span>Needs your own OpenAI API key &mdash;</span><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">get one</a><input type="password" id="fpKeyInput" placeholder="sk-..."><button class="btn" id="fpKeySave" style="padding:.3rem .6rem; font-size:.74rem;">Save key</button>`}
+        </div>
+        <p class="fp-hint">Requests go from this browser through your own proxy Worker to OpenAI's API with that key &mdash; not through us. Whether OpenAI can use these prompts/photos to train their models is controlled by your own account's <a href="https://platform.openai.com/settings/organization/data-controls" target="_blank" rel="noopener">data-sharing setting</a>, not by this app.</p>
+      `;
+    }
     const hasKey = !!fpGetApiKey();
-    const wrap = openModal('Generate floor plan from photos', `
-      <p class="fp-hint" style="margin-top:0;">Take 3&ndash;4 photos of the room from different corners, so every wall shows in at least one shot. Include doors, windows, and the furniture you want on the plan.</p>
-      <div class="fp-photo-drop" id="fpPhotoDrop">Tap to choose photos, or drag them here</div>
-      <input type="file" id="fpPhotoInput" accept="image/*" multiple style="display:none;">
-      <div id="fpPhotoThumbs" class="fp-photo-thumbs"></div>
-      <label class="mini" style="display:block; margin-top:.7rem; color:var(--dim);">Known dimensions or notes (optional)
-        <textarea id="fpKnownDims" rows="3" placeholder="e.g. back wall is about 22 feet, ceilings are 9 feet"></textarea>
-      </label>
-      <div style="margin-top:.7rem; display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;">
-        <button class="btn" id="fpGenerateBtn" style="border-color:var(--accent); color:var(--accent);">Generate floor plan</button>
-        <span id="fpGenerateStatus" class="fp-hint" style="margin:0;"></span>
-      </div>
+    return `
       <div class="fp-key-row">
         ${hasKey
           ? `<span>Anthropic API key is set (this device only).</span><button class="fp-row-remove" id="fpKeyClear" style="width:auto; border-radius:6px; padding:.2rem .5rem;" title="Remove saved key">Clear key</button>`
           : `<span>Needs your own Anthropic API key &mdash;</span><a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">get one</a><input type="password" id="fpKeyInput" placeholder="sk-ant-..."><button class="btn" id="fpKeySave" style="padding:.3rem .6rem; font-size:.74rem;">Save key</button>`}
       </div>
       <p class="fp-hint">Photos and notes go straight from this browser to Anthropic's API with that key &mdash; not through us, not stored anywhere but here.</p>
+    `;
+  }
+
+  function fpOpenGenerateModal(){
+    const provider = fpGetProvider();
+    const wrap = openModal('Generate floor plan', `
+      <p class="fp-hint" style="margin-top:0;">Take 3&ndash;4 photos of the room from different corners, so every wall shows in at least one shot, and/or just describe the room's dimensions below &mdash; photos are optional if you give exact measurements.</p>
+      <div class="fp-photo-drop" id="fpPhotoDrop">Tap to choose photos, or drag them here</div>
+      <input type="file" id="fpPhotoInput" accept="image/*" multiple style="display:none;">
+      <div id="fpPhotoThumbs" class="fp-photo-thumbs"></div>
+      <label class="mini" style="display:block; margin-top:.7rem; color:var(--dim);">Known dimensions or notes (required if no photos)
+        <textarea id="fpKnownDims" rows="3" placeholder="e.g. back wall is about 22 feet, ceilings are 9 feet"></textarea>
+      </label>
+      <div class="mini" style="display:flex; gap:.4rem; margin-top:.7rem;">
+        <button class="btn fp-provider-btn" data-provider="anthropic" style="${provider==='anthropic'?'border-color:var(--accent); color:var(--accent);':''}">Claude (Anthropic)</button>
+        <button class="btn fp-provider-btn" data-provider="openai" style="${provider==='openai'?'border-color:var(--accent); color:var(--accent);':''}">OpenAI</button>
+      </div>
+      <div id="fpKeyRowWrap" style="margin-top:.5rem;">${fpKeyRowHtml(provider)}</div>
+      <div style="margin-top:.7rem; display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;">
+        <button class="btn" id="fpGenerateBtn" style="border-color:var(--accent); color:var(--accent);">Generate floor plan</button>
+        <span id="fpGenerateStatus" class="fp-hint" style="margin:0;"></span>
+      </div>
     `);
+
+    wrap.querySelectorAll('.fp-provider-btn').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        fpSetProvider(btn.dataset.provider);
+        wrap.remove();
+        fpOpenGenerateModal();
+      });
+    });
 
     const picked = [];
     const drop = wrap.querySelector('#fpPhotoDrop');
@@ -3453,12 +3540,16 @@
       renderThumbs();
     });
 
+    const proxyInput = wrap.querySelector('#fpProxyInput');
+    if(proxyInput){
+      proxyInput.addEventListener('change', ()=> fpSetOpenAiProxyUrl(proxyInput.value.trim()));
+    }
     const keySave = wrap.querySelector('#fpKeySave');
     if(keySave){
       keySave.addEventListener('click', ()=>{
         const v = wrap.querySelector('#fpKeyInput').value.trim();
         if(!v){ toast('Enter a key first.', true); return; }
-        fpSetApiKey(v);
+        if(provider==='openai') fpSetOpenAiKey(v); else fpSetApiKey(v);
         wrap.remove();
         fpOpenGenerateModal();
       });
@@ -3466,7 +3557,7 @@
     const keyClear = wrap.querySelector('#fpKeyClear');
     if(keyClear){
       keyClear.addEventListener('click', ()=>{
-        fpSetApiKey('');
+        if(provider==='openai') fpSetOpenAiKey(''); else fpSetApiKey('');
         wrap.remove();
         fpOpenGenerateModal();
       });
@@ -3474,11 +3565,13 @@
 
     wrap.querySelector('#fpGenerateBtn').addEventListener('click', async ()=>{
       const status = wrap.querySelector('#fpGenerateStatus');
-      if(!fpGetApiKey()){ status.textContent = 'Save an API key first.'; return; }
-      if(picked.length===0){ status.textContent = 'Choose at least one photo.'; return; }
       const notes = wrap.querySelector('#fpKnownDims').value.trim();
+      const hasKey = provider==='openai' ? !!fpGetOpenAiKey() : !!fpGetApiKey();
+      if(!hasKey){ status.textContent = 'Save an API key first.'; return; }
+      if(provider==='openai' && !fpGetOpenAiProxyUrl()){ status.textContent = 'Enter your proxy Worker URL first.'; return; }
+      if(picked.length===0 && !notes){ status.textContent = 'Add at least one photo or describe the room\'s dimensions.'; return; }
       const btn = wrap.querySelector('#fpGenerateBtn');
-      btn.disabled = true; status.textContent = 'Analyzing '+picked.length+' photo'+(picked.length===1?'':'s')+'…';
+      btn.disabled = true; status.textContent = picked.length ? ('Analyzing '+picked.length+' photo'+(picked.length===1?'':'s')+'…') : 'Generating from description…';
       try{
         const result = await fpAnalyzePhotos(picked, notes);
         fpPushHistory();
@@ -3494,12 +3587,8 @@
     });
   }
 
-  async function fpAnalyzePhotos(files, notes){
-    const images = await Promise.all(files.map(async f=>({
-      type:'image',
-      source:{ type:'base64', media_type: f.type||'image/jpeg', data: await fpFileToBase64(f) },
-    })));
-    const prompt = `You are analyzing photos of a single room to produce an approximate, to-scale floor plan. Treat the room as one simple rectangle unless the photos clearly show otherwise.
+  function fpAnalyzePrompt(notes, hasPhotos){
+    return `You are producing an approximate, to-scale floor plan for a single room${hasPhotos ? ' from the photos below' : ' from the measurements/description below (no photos were provided)'}. Treat the room as one simple rectangle unless ${hasPhotos ? 'the photos clearly show otherwise' : 'the description clearly implies otherwise'}.
 
 Coordinate system: origin (0,0) is the back-left corner as seen facing the "back" wall (whichever wall has the most window/door area, or the first wall you identify). X increases rightward along back/front walls; Y increases going from the back wall toward the front wall. Room is room.w feet wide (X) by room.d feet deep (Y).
 
@@ -3513,6 +3602,24 @@ Respond with ONLY a single JSON object, no markdown fences, no commentary, match
 {"title": string, "room": {"w": number, "d": number}, "openings": [{"wall": "back"|"right"|"front"|"left", "offset": number, "width": number, "label": string}], "furniture": [{"label": string, "w": number, "d": number, "cx": number, "cy": number, "rot": number}], "notes": [string, ...]}
 
 Include a "notes" entry stating which figures are firm (anchored to a supplied measurement or a standard size like a door width) versus rough visual estimates.`;
+  }
+
+  function fpExtractJson(text){
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if(!jsonMatch) throw new Error('Could not find JSON in the response.');
+    return JSON.parse(jsonMatch[0]);
+  }
+
+  async function fpAnalyzePhotos(files, notes){
+    return fpGetProvider()==='openai' ? fpAnalyzePhotosOpenAI(files, notes) : fpAnalyzePhotosAnthropic(files, notes);
+  }
+
+  async function fpAnalyzePhotosAnthropic(files, notes){
+    const images = await Promise.all(files.map(async f=>({
+      type:'image',
+      source:{ type:'base64', media_type: f.type||'image/jpeg', data: await fpFileToBase64(f) },
+    })));
+    const prompt = fpAnalyzePrompt(notes, files.length>0);
 
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -3534,15 +3641,51 @@ Include a "notes" entry stating which figures are firm (anchored to a supplied m
     }
     const data = await resp.json();
     const text = (data.content||[]).map(b=>b.text||'').join('').trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if(!jsonMatch) throw new Error('Could not find JSON in the response.');
-    return JSON.parse(jsonMatch[0]);
+    return fpExtractJson(text);
   }
 
-  function fpApplyGeneratedPlan(result){
+  async function fpAnalyzePhotosOpenAI(files, notes){
+    const proxyUrl = fpGetOpenAiProxyUrl();
+    if(!proxyUrl) throw new Error('Set your proxy Worker URL first (see cloudflare-worker/README.md).');
+    const images = await Promise.all(files.map(async f=>({
+      type:'image_url',
+      image_url:{ url: `data:${f.type||'image/jpeg'};base64,${await fpFileToBase64(f)}` },
+    })));
+    const prompt = fpAnalyzePrompt(notes, files.length>0);
+
+    const resp = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'authorization': 'Bearer ' + fpGetOpenAiKey(),
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        max_tokens: 4096,
+        response_format: { type: 'json_object' },
+        messages: [{ role:'user', content: [ ...images, { type:'text', text: prompt } ] }],
+      }),
+    });
+    if(!resp.ok){
+      const errBody = await resp.text().catch(()=>'');
+      throw new Error('API error ' + resp.status + (errBody ? ': ' + errBody.slice(0,200) : ''));
+    }
+    const data = await resp.json();
+    const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    return fpExtractJson(text);
+  }
+
+  // Shared by both the photo-generation and text-edit flows -- takes an API
+  // response shaped like fpState and replaces the current plan with it,
+  // preserving legend/title from the current plan when the response doesn't
+  // specify its own (a text edit like "move the sofa" has no reason to
+  // reset legend customizations, for instance).
+  function fpApplyGeneratedPlan(result, opts){
+    opts = opts || {};
+    const prev = fpState;
     const room = result.room || {};
     fpState = {
-      title: typeof result.title==='string' && result.title.trim() ? result.title.trim() : 'Generated Floor Plan',
+      title: typeof result.title==='string' && result.title.trim() ? result.title.trim() : (prev && prev.title) || 'Generated Floor Plan',
       room: {
         w: (typeof room.w==='number' && room.w>1) ? room.w : 20,
         d: (typeof room.d==='number' && room.d>1) ? room.d : 16,
@@ -3563,17 +3706,101 @@ Include a "notes" entry stating which figures are firm (anchored to a supplied m
         cy: Number(f.cy)||0,
         rot: Number(f.rot)||0,
       })),
-      legend: [
-        { id: fpIdSeq++, color:'#40d0b5', label:'Furniture', desc:'drag to move, top dot to spin' },
-        { id: fpIdSeq++, color:'#2b8f7c', label:'Opening', desc:'door or window in a wall' },
-      ],
-      notes: (Array.isArray(result.notes)?result.notes:[]).map(String),
+      legend: Array.isArray(result.legend) && result.legend.length
+        ? result.legend.map(l=>({ id: fpIdSeq++, color:String(l.color||'#40d0b5'), label:String(l.label||''), desc:String(l.desc||'') }))
+        : (prev && prev.legend) || [
+            { id: fpIdSeq++, color:'#40d0b5', label:'Furniture', desc:'drag to move, top dot to spin' },
+            { id: fpIdSeq++, color:'#2b8f7c', label:'Opening', desc:'door or window in a wall' },
+          ],
+      notes: Array.isArray(result.notes) ? result.notes.map(String) : ((prev && prev.notes) || []),
     };
     fpSelectedId = null;
     document.getElementById('fpTitle').textContent = fpState.title;
     document.getElementById('fpRoomW').value = fpFmtFeet(fpState.room.w);
     document.getElementById('fpRoomD').value = fpFmtFeet(fpState.room.d);
     fpSave(); fpRender();
+  }
+
+  function fpStateToApiShape(){
+    return {
+      title: fpState.title,
+      room: fpState.room,
+      openings: fpState.openings.map(({wall,offset,width,label})=>({wall,offset,width,label})),
+      furniture: fpState.furniture.map(({label,w,d,cx,cy,rot})=>({label,w,d,cx,cy,rot})),
+      legend: fpState.legend.map(({color,label,desc})=>({color,label,desc})),
+      notes: fpState.notes,
+    };
+  }
+
+  function fpEditPrompt(instruction){
+    return `Here is a floor plan as JSON, using the same coordinate system described below:
+Coordinate system: origin (0,0) is the back-left corner facing the "back" wall. X increases rightward along back/front walls; Y increases from the back wall toward the front wall. room.w/room.d are the room's overall size in feet. Wall openings' "offset" is feet along that wall from its starting corner (back/front measure X from the left; left/right measure Y from the back), "width" in feet. Furniture "cx"/"cy" are the item's center in feet; "w"/"d" are its footprint in INCHES; "rot" is degrees.
+
+Current plan:
+${JSON.stringify(fpStateToApiShape())}
+
+Requested change: "${instruction}"
+
+Apply exactly this change and nothing else (keep everything else -- other furniture, openings, legend, notes, title -- as-is unless the change logically requires touching it). Respond with ONLY the full updated JSON object in the exact same shape as the input (title, room, openings, furniture, legend, notes), no markdown fences, no commentary.`;
+  }
+
+  async function fpEditPlanWithText(instruction){
+    return fpGetProvider()==='openai' ? fpEditPlanWithTextOpenAI(instruction) : fpEditPlanWithTextAnthropic(instruction);
+  }
+
+  async function fpEditPlanWithTextAnthropic(instruction){
+    if(!fpGetApiKey()) throw new Error('Set your Anthropic API key first (open "Generate floor plan" to add one).');
+    const prompt = fpEditPrompt(instruction);
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': fpGetApiKey(),
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 4096,
+        messages: [{ role:'user', content: prompt }],
+      }),
+    });
+    if(!resp.ok){
+      const errBody = await resp.text().catch(()=>'');
+      throw new Error('API error ' + resp.status + (errBody ? ': ' + errBody.slice(0,200) : ''));
+    }
+    const data = await resp.json();
+    const text = (data.content||[]).map(b=>b.text||'').join('').trim();
+    return fpExtractJson(text);
+  }
+
+  async function fpEditPlanWithTextOpenAI(instruction){
+    const proxyUrl = fpGetOpenAiProxyUrl();
+    if(!proxyUrl) throw new Error('Set your proxy Worker URL first (see cloudflare-worker/README.md).');
+    if(!fpGetOpenAiKey()) throw new Error('Set your OpenAI API key first (open "Generate floor plan" to add one).');
+    const prompt = fpEditPrompt(instruction);
+
+    const resp = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'authorization': 'Bearer ' + fpGetOpenAiKey(),
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        max_tokens: 4096,
+        response_format: { type: 'json_object' },
+        messages: [{ role:'user', content: prompt }],
+      }),
+    });
+    if(!resp.ok){
+      const errBody = await resp.text().catch(()=>'');
+      throw new Error('API error ' + resp.status + (errBody ? ': ' + errBody.slice(0,200) : ''));
+    }
+    const data = await resp.json();
+    const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    return fpExtractJson(text);
   }
 
   // ---------- PWA: bootstrap ----------
