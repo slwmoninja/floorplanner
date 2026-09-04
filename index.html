@@ -135,6 +135,10 @@
     outline:none; border-radius:6px; padding:.15rem .3rem; display:inline-block;
   }
   .fp-title:hover, .fp-title:focus{ background:var(--panel2); }
+  .fp-zoom-row{
+    display:flex; align-items:center; gap:.4rem; margin:0 0 .5rem;
+  }
+  .fp-zoom-btn{ padding:.15rem .55rem; min-width:2rem; }
   .fp-canvas-wrap{
     overflow:auto; border-radius:10px; background:#0e1013;
     background-image:
@@ -462,6 +466,12 @@
     <div class="fp-layout">
       <div class="fp-main">
         <h2 class="fp-title" id="fpTitle" contenteditable="true" spellcheck="false">Untitled Floor Plan</h2>
+        <div class="fp-zoom-row">
+          <button class="btn fp-zoom-btn" id="fpZoomOut" title="Zoom out">&minus;</button>
+          <span class="mini" id="fpZoomLabel">100%</span>
+          <button class="btn fp-zoom-btn" id="fpZoomIn" title="Zoom in">+</button>
+          <button class="btn fp-zoom-btn" id="fpZoomFit" title="Reset to fit the screen">Fit</button>
+        </div>
         <div class="fp-canvas-wrap" id="fpCanvasWrap">
           <div class="fp-canvas" id="fpCanvas"></div>
         </div>
@@ -2698,7 +2708,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+8470ccc8';
+  const APP_VERSION = '1.0+4fc3ae46';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -3038,10 +3048,11 @@
   // rotatable, deletable, resizable), plus editable title/legend/notes.
   // Everything here is local -- no photo analysis yet (see general notes in
   // the app about that being a separate, opt-in step).
-  const FP_SCALE = 22; // px per foot
+  const FP_SCALE = 22; // px per foot, before auto-fit/zoom are applied
   const FP_STORAGE_KEY = 'floorplanner-plan-v1';
   let fpState = null;
   let fpSelectedId = null;
+  let fpZoomMultiplier = 1; // manual zoom on top of auto-fit, reset by the Fit button
   let fpHistory = [];
   let fpIdSeq = 1;
 
@@ -3131,7 +3142,19 @@
 
   function fpRender(){
     const canvas = document.getElementById('fpCanvas');
-    const w = fpState.room.w * FP_SCALE, d = fpState.room.d * FP_SCALE;
+    const wrap = document.getElementById('fpCanvasWrap');
+    // Auto-fit: shrink so the room fits the available width on narrow
+    // screens (never scales UP past real size on wide ones), on top of
+    // which the zoom buttons apply a manual multiplier. Recomputed on every
+    // render, which also covers resize/orientation change since those call
+    // fpRender() too.
+    const naturalW = fpState.room.w * FP_SCALE;
+    const availW = wrap ? wrap.clientWidth - 80 : 0; // minus 40px padding each side
+    const autoFit = (availW > 0) ? Math.min(1, availW/naturalW) : 1;
+    const scale = FP_SCALE * autoFit * fpZoomMultiplier;
+    const zoomLabel = document.getElementById('fpZoomLabel');
+    if(zoomLabel) zoomLabel.textContent = Math.round(autoFit*fpZoomMultiplier*100)+'%';
+    const w = fpState.room.w * scale, d = fpState.room.d * scale;
     canvas.style.width = w+'px'; canvas.style.height = d+'px';
     canvas.innerHTML = '';
 
@@ -3140,7 +3163,7 @@
       const el = document.createElement('div');
       el.className = 'fp-opening' + (/window/i.test(op.label) ? ' window' : '');
       el.title = op.label + ' — tap to edit in the Openings list';
-      const px = op.offset*FP_SCALE, pw = op.width*FP_SCALE;
+      const px = op.offset*scale, pw = op.width*scale;
       const thickness = 4;
       if(op.wall==='back'){ Object.assign(el.style,{left:px+'px',top:-thickness/2+'px',width:pw+'px',height:thickness+'px'}); }
       else if(op.wall==='front'){ Object.assign(el.style,{left:px+'px',top:d-thickness/2+'px',width:pw+'px',height:thickness+'px'}); }
@@ -3154,8 +3177,8 @@
       const el = document.createElement('div');
       el.className = 'fp-item' + (item.id===fpSelectedId ? ' selected' : '');
       el.dataset.id = item.id;
-      const pw = (item.w/12)*FP_SCALE, pd = (item.d/12)*FP_SCALE;
-      const px = item.cx*FP_SCALE - pw/2, py = item.cy*FP_SCALE - pd/2;
+      const pw = (item.w/12)*scale, pd = (item.d/12)*scale;
+      const px = item.cx*scale - pw/2, py = item.cy*scale - pd/2;
       Object.assign(el.style, {
         left:px+'px', top:py+'px', width:pw+'px', height:pd+'px',
         transform:`rotate(${item.rot||0}deg)`,
@@ -3230,11 +3253,11 @@
         const startX = e.clientX, startY = e.clientY, ocx = item.cx, ocy = item.cy;
         try{ el.setPointerCapture(e.pointerId); }catch(err){}
         function onMove(ev){
-          item.cx = ocx + (ev.clientX-startX)/FP_SCALE;
-          item.cy = ocy + (ev.clientY-startY)/FP_SCALE;
-          const pw2 = (item.w/12)*FP_SCALE, pd2 = (item.d/12)*FP_SCALE;
-          el.style.left = (item.cx*FP_SCALE - pw2/2)+'px';
-          el.style.top = (item.cy*FP_SCALE - pd2/2)+'px';
+          item.cx = ocx + (ev.clientX-startX)/scale;
+          item.cy = ocy + (ev.clientY-startY)/scale;
+          const pw2 = (item.w/12)*scale, pd2 = (item.d/12)*scale;
+          el.style.left = (item.cx*scale - pw2/2)+'px';
+          el.style.top = (item.cy*scale - pd2/2)+'px';
         }
         function onUp(){
           el.removeEventListener('pointermove', onMove);
@@ -3436,6 +3459,15 @@
       document.getElementById('fpRoomW').value = fpFmtFeet(fpState.room.w);
       document.getElementById('fpRoomD').value = fpFmtFeet(fpState.room.d);
       fpSave(); fpRender();
+    });
+
+    document.getElementById('fpZoomIn').addEventListener('click', ()=>{ fpZoomMultiplier = Math.min(3, fpZoomMultiplier*1.25); fpRender(); });
+    document.getElementById('fpZoomOut').addEventListener('click', ()=>{ fpZoomMultiplier = Math.max(0.25, fpZoomMultiplier/1.25); fpRender(); });
+    document.getElementById('fpZoomFit').addEventListener('click', ()=>{ fpZoomMultiplier = 1; fpRender(); });
+    let fpResizeTimer = null;
+    window.addEventListener('resize', ()=>{
+      clearTimeout(fpResizeTimer);
+      fpResizeTimer = setTimeout(()=>{ if(currentScreenName==='floorplan') fpRender(); }, 150);
     });
 
     document.addEventListener('keydown', (e)=>{
