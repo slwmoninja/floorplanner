@@ -944,6 +944,11 @@
     clearTimeout(placeSaveDebounce);
     saveEditorProjectNow();
     savePlaceProjectNow();
+    // Same "about to disappear" moment -- write the floor plan's Exit App
+    // Backup immediately too, bypassing/cancelling its own debounce rather
+    // than waiting on it (see scheduleFpExitBackup/writeFpExitBackup below).
+    clearTimeout(fpExitBackupDebounceId); fpExitBackupDebounceId = null;
+    writeFpExitBackup();
   }
   document.addEventListener('visibilitychange', ()=>{
     if(document.visibilityState==='hidden') flushPendingProjectSaves();
@@ -2693,7 +2698,7 @@
   // commit (derived from a content hash of index.html/manifest.json/icons) --
   // never hand-bumped, so it always reflects what's actually deployed and can
   // be used to confirm a reload picked up the latest push.
-  const APP_VERSION = '1.0+eac162eb';
+  const APP_VERSION = '1.0+bf1724ef';
 
   // ---------- PWA: generic centered popup ----------
   // Reused for install/uninstall steps, the About panel (this single-screen
@@ -2832,7 +2837,13 @@
       aboutInstallRowHtml() +
       (showResetLink ?
         '<div style="margin-top:.6rem;"><a href="#" id="resetInstallLink" style="color:var(--dim); font-size:.78rem;">Not on your Home Screen? Reset install status</a></div>'
-        : '')
+        : '') +
+      '<div style="margin-top:1rem; padding-top:.8rem; border-top:1px solid var(--border);">' +
+        '<div style="font-weight:600; margin-bottom:.5rem;">Floor plan backup</div>' +
+        '<button class="btn" id="fpBackupNowBtn" style="width:100%;">Back up now</button>' +
+        '<button class="btn" id="fpRestoreBtn" style="width:100%; margin-top:.5rem;">Restore from backup&hellip;</button>' +
+        '<input type="file" id="fpRestoreFileInput" accept="application/json,.json,.js,text/javascript,application/javascript" multiple style="display:none;">' +
+      '</div>'
     );
     wrap.querySelector('#aboutInstallBtn').addEventListener('click', ()=>{ wrap.remove(); onInstallPillClick(); });
     const resetLink = wrap.querySelector('#resetInstallLink');
@@ -2845,6 +2856,17 @@
         toast('Install status reset.');
       });
     }
+    // Manual backup (Step 6) / restore (Step 7) for the floor plan -- the one
+    // piece of real user data this app persists (see the big PWA
+    // backup/restore comment block near fpSave()/initFloorPlan()).
+    wrap.querySelector('#fpBackupNowBtn').addEventListener('click', async ()=>{
+      if(!fpBackupPayload()){ toast('Nothing to back up yet — edit your floor plan first.', true); return; }
+      const wrote = await runFpBackupDownload();
+      toast(wrote ? 'Backup saved.' : 'Already up to date — no changes since last backup.');
+    });
+    const restoreFileInput = wrap.querySelector('#fpRestoreFileInput');
+    wrap.querySelector('#fpRestoreBtn').addEventListener('click', ()=>{ openFpBackupRestorePicker(restoreFileInput); });
+    restoreFileInput.addEventListener('change', ()=>{ importLatestFpBackupFromFiles(restoreFileInput.files); });
   });
 
   // Proactive "Install FloorPlanner?" prompt, shown once ever per device,
@@ -3067,6 +3089,7 @@
       const toSave = Object.assign({}, fpState, { __idSeq: fpIdSeq });
       localStorage.setItem(FP_STORAGE_KEY, JSON.stringify(toSave));
     }catch(e){}
+    scheduleFpExitBackup(); // debounced silent safety-net snapshot -- see the PWA backup/restore section below
   }
   function fpPushHistory(){
     fpHistory.push(JSON.stringify(fpState));
@@ -3803,13 +3826,370 @@ Apply exactly this change and nothing else (keep everything else -- other furnit
     return fpExtractJson(text);
   }
 
+  // ---------- PWA: manual backup / restore of the floor plan (Steps 6/6b/7/7a) ----------
+  // The floor plan (title/room/openings/furniture/legend/notes, stored under
+  // FP_STORAGE_KEY) is the one piece of real user data this app persists --
+  // the photo-cutout tool's own "Save/Restore Project" IndexedDB slots above
+  // are explicitly NOT a backup (see the comment on PROJECT_DB_NAME: "not the
+  // user's real backup"). This section is that actual backup/restore flow,
+  // same pattern as HealthScore's.
+
+  function fpEscapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ---- Manual "Back up now" ----
+  // A FileSystemFileHandle isn't JSON-serializable, so it has to live in
+  // IndexedDB, not localStorage, across reloads -- lets repeat backups
+  // overwrite the same on-disk file instead of re-prompting every time on
+  // browsers that support it.
+  const FP_BACKUP_HANDLE_DB = 'floorplanner-backup-fs', FP_BACKUP_HANDLE_STORE = 'handles', FP_BACKUP_HANDLE_KEY = 'backupFile';
+  function openFpHandleDb(){
+    return new Promise((resolve, reject)=>{
+      const req = indexedDB.open(FP_BACKUP_HANDLE_DB, 1);
+      req.onupgradeneeded = ()=>{ req.result.createObjectStore(FP_BACKUP_HANDLE_STORE); };
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+  async function loadSavedFpBackupHandle(){
+    try{
+      const db = await openFpHandleDb();
+      return await new Promise((resolve, reject)=>{
+        const req = db.transaction(FP_BACKUP_HANDLE_STORE,'readonly').objectStore(FP_BACKUP_HANDLE_STORE).get(FP_BACKUP_HANDLE_KEY);
+        req.onsuccess = ()=>resolve(req.result||null);
+        req.onerror = ()=>reject(req.error);
+      });
+    }catch(e){ return null; }
+  }
+  async function saveFpBackupHandle(handle){
+    try{
+      const db = await openFpHandleDb();
+      await new Promise((resolve, reject)=>{
+        const tx = db.transaction(FP_BACKUP_HANDLE_STORE,'readwrite');
+        tx.objectStore(FP_BACKUP_HANDLE_STORE).put(handle, FP_BACKUP_HANDLE_KEY);
+        tx.oncomplete = resolve; tx.onerror = ()=>reject(tx.error);
+      });
+    }catch(e){ /* best-effort */ }
+  }
+  async function getWritableFpBackupHandle(){
+    if(!window.showSaveFilePicker) return null;
+    try{
+      let handle = await loadSavedFpBackupHandle();
+      if(handle){
+        const perm = await handle.queryPermission({mode:'readwrite'});
+        if(perm==='granted') return handle;
+        const req = await handle.requestPermission({mode:'readwrite'});
+        if(req==='granted') return handle;
+        return null; // permission denied
+      }
+      handle = await window.showSaveFilePicker({
+        suggestedName: 'floorplanner-plan.json',
+        types: [{ description:'FloorPlanner backup', accept:{'application/json':['.json']} }]
+      });
+      await saveFpBackupHandle(handle);
+      return handle;
+    }catch(e){
+      return null; // user cancelled the picker, or any other failure -- caller falls back
+    }
+  }
+
+  // The exact bytes already sitting in localStorage under FP_STORAGE_KEY
+  // (title/room/openings/furniture/legend/notes/__idSeq) IS the backup
+  // payload -- no separate export shape to keep in sync with fpSave()/fpLoad().
+  function fpBackupPayload(){
+    try{ return localStorage.getItem(FP_STORAGE_KEY) || ''; }catch(e){ return ''; }
+  }
+  const FP_BACKUP_LAST_FINGERPRINT_KEY = 'fp_last_backup_fingerprint';
+
+  // Manual/on-demand only, from the About popup's "Back up now" -- never
+  // called automatically. Skips writing/downloading anything unchanged since
+  // the last backup: without this, every tap on a browser with no File System
+  // Access API (iOS Safari, most Android Chrome) produces a brand-new
+  // timestamped file whether or not anything actually changed. Returns
+  // whether it actually wrote a backup, so the caller can tell "saved" from
+  // "already up to date" instead of always claiming success.
+  async function runFpBackupDownload(){
+    const json = fpBackupPayload();
+    if(!json) return false; // nothing saved yet -- floor plan hasn't been touched
+    if(json === localStorage.getItem(FP_BACKUP_LAST_FINGERPRINT_KEY)) return false;
+
+    const handle = await getWritableFpBackupHandle();
+    if(handle){
+      try{
+        const writable = await handle.createWritable();
+        await writable.write(json);
+        await writable.close();
+        localStorage.setItem(FP_BACKUP_LAST_FINGERPRINT_KEY, json);
+        return true;
+      }catch(e){ /* fall through to the timestamped-download fallback below */ }
+    }
+    try{
+      const blob = new Blob([json], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      // Timestamped, not a fixed name -- a fixed name hits a hard "file
+      // already exists" failure on-device rather than a silent rename, on the
+      // browsers that land here (no File System Access API, or no granted
+      // handle yet).
+      const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+      a.download = `floorplanner-plan-${stamp}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      localStorage.setItem(FP_BACKUP_LAST_FINGERPRINT_KEY, json);
+      return true;
+    }catch(e){ return false; }
+  }
+
+  // ---- Exit App Backup (Step 6b) -- silent, single overwritten IndexedDB
+  // slot, entirely separate from the manual backup above. Never reachable
+  // from any button/menu, no toast, no filename -- its only user-visible
+  // effect is as a candidate source for the restore-on-empty-state auto-
+  // detect flow below.
+  const FP_EXIT_BACKUP_DB = 'floorplanner-exit-backup', FP_EXIT_BACKUP_STORE = 'snapshot', FP_EXIT_BACKUP_KEY = 'latest';
+  const FP_EXIT_BACKUP_LAST_FINGERPRINT_KEY = 'fp_last_exit_backup_fingerprint';
+  function openFpExitBackupDb(){
+    return new Promise((resolve, reject)=>{
+      const req = indexedDB.open(FP_EXIT_BACKUP_DB, 1);
+      req.onupgradeneeded = ()=>{ req.result.createObjectStore(FP_EXIT_BACKUP_STORE); };
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+  }
+  async function writeFpExitBackup(){
+    const json = fpBackupPayload();
+    if(!json) return false;
+    if(json === localStorage.getItem(FP_EXIT_BACKUP_LAST_FINGERPRINT_KEY)) return false;
+    try{
+      const db = await openFpExitBackupDb();
+      await new Promise((resolve, reject)=>{
+        const tx = db.transaction(FP_EXIT_BACKUP_STORE, 'readwrite');
+        tx.objectStore(FP_EXIT_BACKUP_STORE).put(json, FP_EXIT_BACKUP_KEY);
+        // Force an immediate commit attempt instead of waiting on the
+        // browser's own idle-detection heuristic -- feature-detected, since
+        // Safari/iOS has no IDBTransaction.commit() and silently keeps the
+        // old auto-commit-on-idle behavior there.
+        if(typeof tx.commit==='function') tx.commit();
+        tx.oncomplete = resolve; tx.onerror = ()=>reject(tx.error);
+      });
+      localStorage.setItem(FP_EXIT_BACKUP_LAST_FINGERPRINT_KEY, json);
+      return true;
+    }catch(e){ return false; } // best-effort/silent -- nothing to surface a failure to at exit time
+  }
+  // Debounced, called from fpSave() on every real edit -- by the time
+  // backgrounding actually happens the snapshot is typically already
+  // near-current instead of depending on one risky just-in-time write racing
+  // the freeze (see writeFpExitBackup's tx.commit() above, and
+  // flushPendingProjectSaves' immediate/undebounced call on visibilitychange/pagehide).
+  let fpExitBackupDebounceId = null;
+  function scheduleFpExitBackup(){
+    if(fpExitBackupDebounceId) clearTimeout(fpExitBackupDebounceId);
+    fpExitBackupDebounceId = setTimeout(()=>{ fpExitBackupDebounceId = null; writeFpExitBackup(); }, 500);
+  }
+  async function readFpExitBackup(){
+    try{
+      const db = await openFpExitBackupDb();
+      return await new Promise((resolve, reject)=>{
+        const req = db.transaction(FP_EXIT_BACKUP_STORE, 'readonly').objectStore(FP_EXIT_BACKUP_STORE).get(FP_EXIT_BACKUP_KEY);
+        req.onsuccess = ()=>resolve(req.result || null);
+        req.onerror = ()=>reject(req.error);
+      });
+    }catch(e){ return null; }
+  }
+
+  // ---- Restore (Step 7) ----
+  function fpValidBackupShape(parsed){
+    return !!parsed && typeof parsed==='object' && parsed.room &&
+      typeof parsed.room.w==='number' && typeof parsed.room.d==='number';
+  }
+  // Same blank template "Clear plan" already resets to -- used here so a
+  // backup missing a field a future app version might add doesn't leave it
+  // undefined, without leaking the *seed demo* furniture/openings that
+  // fpDefaultState() ships for a genuinely first-ever run.
+  function fpBlankState(){
+    return { title:'Untitled Floor Plan', room:{w:20,d:16}, openings:[], furniture:[], legend:[], notes:[] };
+  }
+  function fpApplyRestoredState(parsed){
+    const blank = fpBlankState();
+    fpState = Object.assign({}, blank, parsed);
+    fpState.room = Object.assign({}, blank.room, parsed.room);
+    fpIdSeq = parsed.__idSeq || 1000;
+    delete fpState.__idSeq;
+    fpSelectedId = null;
+    fpHistory = [];
+    document.getElementById('fpUndoBtn').disabled = true;
+    document.getElementById('fpTitle').textContent = fpState.title;
+    document.getElementById('fpRoomW').value = fpFmtFeet(fpState.room.w);
+    document.getElementById('fpRoomD').value = fpFmtFeet(fpState.room.d);
+    fpSave(); fpRender();
+  }
+  async function importFpBackupFile(file){
+    if(!file) return;
+    try{
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if(!fpValidBackupShape(parsed)) throw new Error('This file does not look like a FloorPlanner backup.');
+      if(!confirm('This will replace the current floor plan on this device with the contents of the imported file. Continue?')) return;
+      fpApplyRestoredState(parsed);
+      document.querySelectorAll('.modal-backdrop').forEach(m=>m.remove());
+      toast('Floor plan restored.');
+    }catch(e){
+      toast('Could not import that file: ' + (e && e.message ? e.message : e), true);
+    }
+  }
+  // Picks the newest FloorPlanner backup out of one or more selected files --
+  // matches this app's own timestamped filename first (sorts correctly as a
+  // string, no file reads needed), falls back to File.lastModified for
+  // anything else selected (e.g. a renamed file). Never makes the user
+  // eyeball filenames.
+  function fpPickLatestBackupFile(files){
+    const list = Array.from(files||[]).filter(f=>/\.(json|js)$/i.test(f.name));
+    if(list.length===0) return null;
+    const stampOf = f=>{
+      const m = f.name.match(/floorplanner-plan-(.+)\.(?:json|js)$/i);
+      return m ? m[1] : null;
+    };
+    list.sort((a,b)=>{
+      const sa = stampOf(a), sb = stampOf(b);
+      if(sa && sb) return sa<sb ? 1 : sa>sb ? -1 : 0;
+      if(sa && !sb) return -1;
+      if(sb && !sa) return 1;
+      return b.lastModified-a.lastModified;
+    });
+    return list[0];
+  }
+  function importLatestFpBackupFromFiles(files){
+    const latest = fpPickLatestBackupFile(files);
+    if(!latest){ if(files && files.length) toast('No .json or .js backup file found in what you selected.', true); return; }
+    importFpBackupFile(latest);
+  }
+  // On browsers that support it, jumps the native picker straight into the
+  // Downloads folder and allows multi-select in one go. iOS Safari and older/
+  // other Android browsers fall back to the plain <input type=file multiple>
+  // picker, which still supports multi-select and still auto-picks the newest.
+  async function openFpBackupRestorePicker(fallbackInputEl){
+    if(window.showOpenFilePicker){
+      try{
+        const handles = await window.showOpenFilePicker({
+          multiple: true,
+          startIn: 'downloads',
+          types: [{description:'FloorPlanner backup', accept:{
+            'application/json':['.json'],
+            'text/javascript':['.js'],
+            'application/javascript':['.js']
+          }}]
+        });
+        const files = await Promise.all(handles.map(h=>h.getFile()));
+        importLatestFpBackupFromFiles(files);
+        return;
+      }catch(e){
+        if(e.name==='AbortError') return; // user backed out of the picker -- don't chain into a second one
+      }
+    }
+    fallbackInputEl.click();
+  }
+
+  // ---- Restore prompt at startup (Step 7a auto-detect) ----
+  // Gated on FP_STORAGE_KEY being genuinely absent from localStorage (the
+  // floor plan has never been edited on this device, OR it was wiped) AND
+  // isInstalled() (some signal this device previously ran FloorPlanner for
+  // real -- either isStandaloneApp() itself, which stays true across a data
+  // wipe since it's about the window's own display mode rather than storage,
+  // or the persisted install-accepted flag). Without that second gate, a
+  // genuinely brand-new visitor with zero backups would see "restore your
+  // data?" before they've ever had any.
+  //
+  // Path A0 (every platform, checked first) -- a plain IndexedDB read of
+  // Step 6b's Exit App Backup, needing no permission/gesture on any platform,
+  // and the freshest silent source since it's refreshed on every real edit.
+  async function tryFpAutoRestorePathA0(){
+    try{
+      const json = await readFpExitBackup();
+      if(!json) return false;
+      const parsed = JSON.parse(json);
+      if(!fpValidBackupShape(parsed)) return false;
+      offerFpAutoRestore(parsed);
+      return true;
+    }catch(e){ return false; }
+  }
+  // Path A (File System Access browsers only) -- query only, never
+  // requestPermission() here; there's no user gesture this early in the page
+  // lifecycle to justify escalating permission.
+  async function tryFpAutoRestorePathA(){
+    if(!window.showSaveFilePicker) return false;
+    try{
+      const handle = await loadSavedFpBackupHandle();
+      if(!handle) return false;
+      const perm = await handle.queryPermission({mode:'read'});
+      if(perm!=='granted') return false;
+      const file = await handle.getFile();
+      const parsed = JSON.parse(await file.text());
+      if(!fpValidBackupShape(parsed)) return false;
+      offerFpAutoRestore(parsed);
+      return true;
+    }catch(e){ return false; }
+  }
+  function offerFpAutoRestore(parsed){
+    const n = Array.isArray(parsed.furniture) ? parsed.furniture.length : 0;
+    const wrap = openModal('Restore your floor plan?',
+      '<div style="margin-bottom:14px;">This device\'s floor plan looks empty, but a backup was found' +
+      (parsed.title ? ' &mdash; "' + fpEscapeHtml(parsed.title) + '"' : '') +
+      (n ? ' (' + n + ' furniture item' + (n===1?'':'s') + ')' : '') + '. Restore it?</div>' +
+      '<button class="btn-primary" id="fpArYes">Restore</button>' +
+      '<button class="btn-secondary" id="fpArNo">No, start fresh</button>'
+    );
+    wrap.querySelector('#fpArYes').addEventListener('click', ()=>{
+      wrap.remove();
+      fpApplyRestoredState(parsed);
+      toast('Floor plan restored.');
+      maybeShowInstallPrompt();
+    });
+    wrap.querySelector('#fpArNo').addEventListener('click', ()=>{
+      wrap.remove();
+      maybeShowInstallPrompt();
+    });
+  }
+  // Path B (every other case -- most phones, with no Exit App Backup found
+  // either, e.g. its very first session) -- nothing can be silently re-read
+  // without a user gesture here, so the prompt itself IS the ask.
+  function offerFpAutoRestorePathB(){
+    const wrap = openModal('Restore your floor plan?',
+      '<div style="margin-bottom:14px;">This device\'s floor plan looks empty. If you have a backup file saved, you can restore it now.</div>' +
+      '<button class="btn-primary" id="fpArYes">Restore from file&hellip;</button>' +
+      '<input type="file" id="fpArFileInput" accept="application/json,.json,.js,text/javascript,application/javascript" multiple style="display:none;">' +
+      '<button class="btn-secondary" id="fpArNo">No, start fresh</button>'
+    );
+    const fileInput = wrap.querySelector('#fpArFileInput');
+    wrap.querySelector('#fpArYes').addEventListener('click', ()=>{ openFpBackupRestorePicker(fileInput); });
+    fileInput.addEventListener('change', ()=>{
+      if(wrap.isConnected) wrap.remove();
+      importLatestFpBackupFromFiles(fileInput.files);
+      maybeShowInstallPrompt();
+    });
+    wrap.querySelector('#fpArNo').addEventListener('click', ()=>{
+      wrap.remove();
+      maybeShowInstallPrompt();
+    });
+  }
+  function maybeOfferFpAutoRestore(){
+    let hasData = false;
+    try{ hasData = !!localStorage.getItem(FP_STORAGE_KEY); }catch(e){}
+    if(hasData){ maybeShowInstallPrompt(); return; } // real on-device data exists -- never prompt over it
+    if(!isInstalled()){ maybeShowInstallPrompt(); return; } // no signal this device ever ran FloorPlanner before -- treat as a genuine first visit
+    tryFpAutoRestorePathA0().then(handled=>{
+      if(handled) return;
+      tryFpAutoRestorePathA().then(handled2=>{
+        if(!handled2) offerFpAutoRestorePathB();
+      });
+    });
+  }
+
   // ---------- PWA: bootstrap ----------
   syncInstallUI();
   showScreen('floorplan'); // Floor Plan is FloorPlanner's home screen
   try{ history.replaceState({ screen:'floorplan' }, ''); }catch(e){} // the first screen shown on load establishes the baseline
-  maybeShowInstallPrompt();
   initResumeCards();
-  initFloorPlan();
+  initFloorPlan(); // reads FP_STORAGE_KEY via fpLoad() -- must run before the empty-state check below
+  maybeOfferFpAutoRestore(); // resolves "restore your data?" first (Step 7a) if warranted, then itself chains into maybeShowInstallPrompt()
   checkForUpdate();
   document.addEventListener('visibilitychange', ()=>{
     if(document.visibilityState==='visible') checkForUpdate();
