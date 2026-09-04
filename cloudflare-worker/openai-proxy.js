@@ -37,21 +37,23 @@ export default {
       return new Response('Missing Authorization header.', { status: 401, headers: CORS_HEADERS });
     }
 
-    const body = await request.text();
-
+    // Stream the request/response bodies through rather than buffering them
+    // as strings -- photo uploads can be tens of MB (base64-encoded images),
+    // and materializing that in memory as a JS string crashed the Worker
+    // (Cloudflare error 1101) under real multi-photo payloads.
     const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
+        'content-type': request.headers.get('content-type') || 'application/json',
         'authorization': authHeader,
       },
-      body,
+      body: request.body,
+      duplex: 'half',
     });
 
-    const responseBody = await upstream.text();
-    return new Response(responseBody, {
+    return new Response(upstream.body, {
       status: upstream.status,
-      headers: { ...CORS_HEADERS, 'content-type': 'application/json' },
+      headers: { ...CORS_HEADERS, 'content-type': upstream.headers.get('content-type') || 'application/json' },
     });
   },
 };
